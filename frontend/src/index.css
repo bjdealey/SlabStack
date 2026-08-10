@@ -1,0 +1,81 @@
+@import 'tailwindcss';
+
+/* Dark-first: a collection dashboard is looked at for long stretches, and card
+   images read better against a dark ground. Light mode is a supported swap. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-canvas: oklch(0.16 0.012 264);
+  --color-surface: oklch(0.2 0.014 264);
+  --color-surface-raised: oklch(0.24 0.016 264);
+  --color-line: oklch(0.31 0.016 264);
+  --color-ink: oklch(0.97 0.005 264);
+  --color-ink-muted: oklch(0.72 0.014 264);
+  --color-ink-faint: oklch(0.58 0.014 264);
+
+  --color-brand: oklch(0.72 0.16 258);
+  --color-brand-strong: oklch(0.64 0.18 258);
+
+  --color-positive: oklch(0.75 0.17 152);
+  --color-caution: oklch(0.8 0.15 85);
+  --color-negative: oklch(0.68 0.19 25);
+  --color-neutral-accent: oklch(0.7 0.09 264);
+
+  --radius-card: 0.875rem;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html.light {
+    color-scheme: light;
+  }
+
+  html.light body {
+    --tw-canvas: oklch(0.98 0.004 264);
+    background-color: oklch(0.98 0.004 264);
+    color: oklch(0.2 0.02 264);
+  }
+
+  * {
+    border-color: var(--color-line);
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+      sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Big numbers are the point of this UI — they should line up in columns. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 9999px;
+  }
+}
+
+@layer components {
+  .panel {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+  }
+}
