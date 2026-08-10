@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect
 
 from app.api.errors import register_exception_handlers
 from app.api.routes import (
@@ -28,7 +29,7 @@ from app.api.routes import (
 from app.api.routes import (
     settings as settings_routes,
 )
-from app.config import settings
+from app.config import BACKEND_ROOT, settings
 from app.db import engine, session_scope
 from app.models import Base
 from app.services import seed
@@ -54,16 +55,52 @@ calculated as integer minor units server-side.
 def bootstrap() -> None:
     """Create the database if it is missing and top up reference data.
 
-    ``create_all`` is a convenience for a fresh local install; Alembic owns
-    schema changes from there (``alembic upgrade head``).
+    ``create_all`` is the convenience path for a fresh local install — no user
+    should have to run a migration tool to open the app for the first time. It
+    is followed by an Alembic *stamp* so that a database built this way is
+    recorded as being at head; without it, the first ``alembic upgrade head``
+    would try to create tables that already exist.
+
+    A database Alembic already knows about is left entirely alone, so the two
+    paths (app-first and migration-first) converge.
     """
     settings.ensure_directories()
+
+    fresh = not _has_alembic_version()
     Base.metadata.create_all(bind=engine)
+    if fresh:
+        _stamp_alembic_head()
+
     with session_scope() as db:
         counts = seed.seed_all(db)
     inserted = {key: value for key, value in counts.items() if value}
     if inserted:
         logger.info("Seeded reference data: %s", inserted)
+
+
+def _has_alembic_version() -> bool:
+    return inspect(engine).has_table("alembic_version")
+
+
+def _stamp_alembic_head() -> None:
+    """Record the freshly created schema as being at the latest revision."""
+    try:
+        from alembic.config import Config
+
+        from alembic import command
+    except ImportError:  # pragma: no cover - alembic is an install-time dep
+        logger.warning("Alembic is not installed; skipping revision stamp.")
+        return
+
+    config_path = BACKEND_ROOT / "alembic.ini"
+    if not config_path.exists():  # pragma: no cover - packaged without migrations
+        return
+
+    config = Config(str(config_path))
+    config.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
+    config.set_main_option("sqlalchemy.url", settings.sqlalchemy_url)
+    command.stamp(config, "head")
+    logger.info("Stamped a new database at the latest migration.")
 
 
 @asynccontextmanager

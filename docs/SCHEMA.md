@@ -189,8 +189,15 @@ alembic revision --autogenerate -m "add x"            # after editing a model
 python -m scripts.dump_schema                         # refresh docs/schema.sql
 ```
 
-A fresh install does not need Alembic: the app calls `create_all` on startup and seeds reference
-data. Alembic takes over for every change after that.
+A fresh install does not need Alembic — nobody should have to run a migration tool to open the app
+for the first time. Startup calls `create_all`, seeds reference data, and then *stamps* the
+database at head. Without that stamp the first `alembic upgrade head` would try to create tables
+that already exist. A database Alembic already knows about is left alone, so both orders work:
+
+| First run                | Then                                    | Result       |
+| ------------------------ | --------------------------------------- | ------------ |
+| Start the app            | `alembic upgrade head` → no-op          | at head ✅   |
+| `alembic upgrade head`   | Start the app → `create_all` no-op, seeds | at head ✅ |
 
 ---
 
