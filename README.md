@@ -115,6 +115,11 @@ generated placeholders, not card scans.
 cd frontend && npm run build:demo    # same build the Pages workflow runs
 ```
 
+`.github/workflows/pages.yml` builds and publishes it. **Pages has to be enabled
+once by hand** — Settings → Pages → Build and deployment → Source: **GitHub
+Actions** — because creating a Pages site needs admin rights the workflow's
+`GITHUB_TOKEN` does not have. Every deploy after that is automatic.
+
 The demo code lives in `src/lib/demo/` and is the only place engine logic is
 duplicated. `VITE_DEMO` is a compile-time constant, so a normal build drops the
 branch and never bundles it.
