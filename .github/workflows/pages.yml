@@ -54,7 +54,11 @@ jobs:
       - name: Build the demo
         run: npm run build:demo
 
+      # `enablement` turns Pages on for the repository the first time this runs,
+      # so there is no settings toggle to remember. A no-op once it is enabled.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
