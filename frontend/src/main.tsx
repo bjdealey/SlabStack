@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, HashRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import App from './App'
@@ -18,13 +18,18 @@ const queryClient = new QueryClient({
   },
 })
 
+// GitHub Pages has no server to rewrite unknown paths to index.html, so the
+// demo routes in the hash. Locally the API serves the SPA fallback and real
+// paths work, including on a hard refresh.
+const Router = import.meta.env.VITE_DEMO === 'true' ? HashRouter : BrowserRouter
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <Router>
         <App />
         <Toaster theme="dark" position="bottom-right" richColors closeButton />
-      </BrowserRouter>
+      </Router>
     </QueryClientProvider>
   </StrictMode>,
 )

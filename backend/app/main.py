@@ -29,6 +29,7 @@ from app.api.routes import (
 from app.api.routes import (
     settings as settings_routes,
 )
+from app.api.spa import mount_spa
 from app.config import BACKEND_ROOT, settings
 from app.db import engine, session_scope
 from app.models import Base
@@ -142,12 +143,19 @@ api.include_router(grading.router)
 api.include_router(phases.router)
 app.include_router(api)
 
+# Must come last: the SPA fallback is a catch-all, so every real route has to be
+# registered before it.
+_static_dir = settings.resolved_static_dir
+if _static_dir is not None:
+    mount_spa(app, _static_dir)
+    logger.info("Serving the built UI from %s", _static_dir)
+else:
 
-@app.get("/", include_in_schema=False)
-def root() -> dict[str, str]:
-    return {
-        "app": settings.app_name,
-        "docs": "/api/docs",
-        "health": "/api/health",
-        "ui": "http://localhost:5173",
-    }
+    @app.get("/", include_in_schema=False)
+    def root() -> dict[str, str]:
+        return {
+            "app": settings.app_name,
+            "docs": "/api/docs",
+            "health": "/api/health",
+            "ui": "http://localhost:5173",
+        }

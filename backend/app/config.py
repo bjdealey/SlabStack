@@ -55,12 +55,19 @@ class Settings(BaseSettings):
         default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
     )
 
+    # --- Static UI ---------------------------------------------------------
+    # When the built frontend is present, the API serves it too, so a packaged
+    # install is one process on one port instead of two.
+    static_dir: Path | None = None
+
     # --- Domain defaults ---------------------------------------------------
     default_currency: str = "GBP"
 
-    @field_validator("data_dir", mode="after")
+    @field_validator("data_dir", "static_dir", mode="after")
     @classmethod
-    def _absolute(cls, value: Path) -> Path:
+    def _absolute(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
         return value if value.is_absolute() else (BACKEND_ROOT / value).resolve()
 
     @property
@@ -74,6 +81,16 @@ class Settings(BaseSettings):
     @property
     def media_dir(self) -> Path:
         return self.data_dir / "media"
+
+    @property
+    def resolved_static_dir(self) -> Path | None:
+        """Where the built UI lives, if it has been built.
+
+        Returns ``None`` in development, where Vite serves the UI and proxies
+        ``/api`` here — so the same code runs both ways with no flag.
+        """
+        candidate = self.static_dir or (REPO_ROOT / "frontend" / "dist")
+        return candidate if (candidate / "index.html").exists() else None
 
     def ensure_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

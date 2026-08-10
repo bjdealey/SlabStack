@@ -30,6 +30,7 @@ backend/data/
 .env
 .env.*
 !.env.example
+!frontend/.env.demo
 
 # --- Editors / OS ---
 .DS_Store

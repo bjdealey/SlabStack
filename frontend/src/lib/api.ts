@@ -22,6 +22,13 @@ import type {
 
 const BASE = '/api'
 
+/**
+ * The GitHub Pages demo has no server behind it, so requests are answered by an
+ * in-browser stand-in. This is a compile-time constant, so a normal build drops
+ * the branch and never bundles the demo code.
+ */
+const DEMO = import.meta.env.VITE_DEMO === 'true'
+
 /** An error that carries the API's structured code, so callers can branch. */
 export class ApiError extends Error {
   readonly code: string
@@ -53,6 +60,21 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (DEMO) {
+    const { demoRequest } = await import('./demo')
+    const result = await demoRequest(path, init)
+    if (!result.ok) {
+      const error = (result.body as ApiErrorBody | null)?.error
+      throw new ApiError(
+        error?.code ?? 'unknown_error',
+        error?.message ?? `Request failed with status ${result.status}`,
+        result.status,
+        error?.details,
+      )
+    }
+    return result.body as T
+  }
+
   let response: Response
   try {
     response = await fetch(`${BASE}${path}`, {

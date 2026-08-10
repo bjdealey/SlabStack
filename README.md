@@ -70,6 +70,57 @@ cd frontend && npm run typecheck && npm run build
 
 ---
 
+## Running it for real (one command)
+
+The two-process setup above is for development. For everyday use, build the UI
+once and let the API serve it — one process, one port:
+
+```bash
+docker compose up --build      # http://localhost:8000
+```
+
+Your collection lives in `./data` on the host: `slabstack.db` plus every uploaded
+image. Copying that directory is a complete backup, and rebuilding the container
+never touches it.
+
+Without Docker, the same thing directly:
+
+```bash
+cd frontend && npm run build
+cd ../backend && SLABSTACK_STATIC_DIR=../frontend/dist uvicorn app.main:app --port 8000
+```
+
+The API serves the built UI whenever a build exists, and falls back to pointing at
+the Vite dev server when one does not, so the same command works either way.
+
+**Compose binds to `127.0.0.1` deliberately.** SlabStack has no authentication —
+it is a single-user local application. Changing the port mapping to `8000:8000`
+puts your collection on your network with nothing in front of it.
+
+---
+
+## The demo
+
+A browser-only build is published to GitHub Pages so the UI can be looked at
+without installing anything:
+
+**<https://bjdealey.github.io/SlabStack/>**
+
+GitHub Pages serves static files, so there is no API and no database behind it.
+The demo answers its own requests in the tab against a sample collection —
+nothing is uploaded, and a refresh starts over. The card images there are
+generated placeholders, not card scans.
+
+```bash
+cd frontend && npm run build:demo    # same build the Pages workflow runs
+```
+
+The demo code lives in `src/lib/demo/` and is the only place engine logic is
+duplicated. `VITE_DEMO` is a compile-time constant, so a normal build drops the
+branch and never bundles it.
+
+---
+
 ## Configuration
 
 Environment variables, all prefixed `SLABSTACK_` (see `.env.example`):
