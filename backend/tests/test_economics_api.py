@@ -225,7 +225,7 @@ def test_a_company_with_no_graded_sales_says_so_rather_than_borrowing_prices(
     block = options_block(client, card["id"], batch=25)
     ace = next(row for row in block["best_case"] if row["company_code"] == "ACE")
     assert ace["best_net"] is None
-    assert ace["reason"] == "No ACE sales stored, so a ACE slab cannot be priced."
+    assert ace["reason"] == "No ACE sales stored, so ACE slabs cannot be priced."
 
 
 def test_the_why_panel_names_the_grader_it_costed_against(client: TestClient, card: dict):

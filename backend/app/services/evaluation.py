@@ -403,7 +403,7 @@ def _best_case_per_company(
             if item.is_graded and item.grade_label.split(" ")[0].upper() == code.upper()
         ]
         if not owned:
-            row.reason = f"No {code} sales stored, so a {code} slab cannot be priced."
+            row.reason = f"No {code} sales stored, so {code} slabs cannot be priced."
             results.append(row)
             continue
 

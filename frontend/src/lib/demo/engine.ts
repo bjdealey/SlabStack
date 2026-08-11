@@ -821,7 +821,7 @@ function bestCasePerCompany(
       (item) => item.is_graded && item.grade_label.split(' ')[0].toUpperCase() === code.toUpperCase(),
     )
     if (!owned.length) {
-      row.reason = `No ${code} sales stored, so a ${code} slab cannot be priced.`
+      row.reason = `No ${code} sales stored, so ${code} slabs cannot be priced.`
       results.push(row)
       continue
     }
