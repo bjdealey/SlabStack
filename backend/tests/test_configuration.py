@@ -194,10 +194,7 @@ def test_enums_endpoint_feeds_the_ui(client: TestClient):
 
 
 def test_later_phase_endpoints_report_their_phase(client: TestClient):
-    for path, phase in (
-        ("/api/analytics/opportunities", 7),
-        ("/api/analytics/accuracy", 8),
-    ):
+    for path, phase in (("/api/analytics/accuracy", 8),):
         response = client.get(path)
         assert response.status_code == 501, path
         assert response.json()["error"]["details"]["phase"] == phase
@@ -208,6 +205,13 @@ def test_submissions_are_no_longer_a_later_phase(client: TestClient):
     response = client.get("/api/submissions")
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_analytics_is_no_longer_a_later_phase(client: TestClient):
+    """Phase 7 landed. The stub has to be gone, not merely shadowed by a real route."""
+    response = client.get("/api/analytics/opportunities")
+    assert response.status_code == 200
+    assert response.json()["status"] == "insufficient_data", "empty collection, honestly reported"
 
 
 def test_provider_sync_says_valuation_already_works_without_it(client: TestClient):

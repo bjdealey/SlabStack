@@ -782,7 +782,11 @@ survives re-imports and reclassification.
 | PATCH  | `/api/submissions/{id}/cards/{lineId}`          | ✅     | Declared value, tier, actual grade, cert number. |
 | DELETE | `/api/submissions/{id}/cards/{lineId}`          | ✅     | Remove a card.                |
 | POST   | `/api/submissions/optimise`                     | ✅     | Pack the collection into batches that still pay once packed. |
-| GET    | `/api/analytics/opportunities`                  | ⏳ P7  | Ranked grading opportunities. |
+| GET    | `/api/analytics/opportunities`                  | ✅     | Ranked grading opportunities. |
+| GET    | `/api/analytics/selling-queue`                  | ✅     | Cards to sell raw, with a price to ask. |
+| GET    | `/api/analytics/submission-returns`             | ✅     | Predicted grades against the ones that came back. |
+| GET    | `/api/analytics/filters`                        | ✅     | The saved cuts on offer.      |
+| GET    | `/api/analytics/filters/{key}`                  | ✅     | Apply one saved cut.          |
 | GET    | `/api/analytics/accuracy`                       | ⏳ P8  | Predicted vs actual grades.   |
 
 ### Costing a submission
@@ -928,6 +932,122 @@ against the effective tier's price would describe a route that does not exist at
 **`stopped_paying` is the honest part.** Cards worth grading in a full batch and not in the batch
 they landed in are listed with the number that changed, and are excluded from every total. They are
 never silently shipped and never silently dropped.
+
+### Analytics
+
+Everything under `/api/analytics` is a **projection of an answer another engine already gave**. No
+verdict, value or cost originates here. If a number appears below it can be traced to the card page
+showing the same figure, and the two cannot drift apart because there is only one of them.
+
+**`GET /api/analytics/opportunities`** — query `batch_size` (default 1), `limit`.
+
+The same verdicts as `/api/collection/decisions`, cut to `grade` and `grade_if_batch_filled` and
+ranked by `opportunity_score`. `batch_size` changes the list: a card that does not pay alone often
+pays in a submission of twenty.
+
+**`GET /api/analytics/selling-queue`** — query `limit`.
+
+The decision engine says "sell raw" and stops; this answers what to ask for it.
+
+```jsonc
+{
+  "status": "partial",
+  "reason": "1 card(s) have no raw sales to price against…",
+  "currency": "GBP", "analysed": 3, "total_cards": 5,
+  "total_net_proceeds": 285.20,
+  "items": [{
+    "card_id": "…", "name": "Sylveon VMAX 211/203", "set_label": "Evolving Skies (EVS)",
+    "decision": "sell_raw",
+    "realistic_sale": 126.00,      // what the market says it fetches
+    "net_proceeds": 110.04,        // what you keep — the same figure the card page shows
+    "suggested_listing": 132.30,   // what to ask, which is not what it fetches
+    "listing_basis": "5% above the realistic sale price. It trades often, so it does not need room.",
+    "liquidity_score": 9.9, "liquidity_band": "very_liquid",
+    "days_since_last_sale": 0, "trend_direction": "down",
+    "confidence": "high",
+    "purchase_price": null,
+    "gain_vs_purchase": null,      // null when you never recorded what you paid — not zero
+    "blockers": []
+  }],
+  "notes": [ … ]
+}
+```
+
+The markup over the realistic price scales with liquidity — 5% when it trades often, 18% when it
+trades rarely and needs room to be haggled down — and is capped at the upper quartile of actual
+sales, because asking more than anyone has recently paid is how a listing sits unsold. The cap
+never pushes the suggestion *below* the realistic price. A card with no raw sales gets **no**
+suggested price and says why in `blockers`.
+
+Membership is by verdict: `sell_raw`, `keep_raw` and `do_not_grade`. A card the engine returned
+`insufficient_data` for is **not** here — "sell it raw" is a conclusion, and it cannot be reached
+until the graded outcome has a price to lose against.
+
+**`GET /api/analytics/submission-returns`** — no parameters.
+
+```jsonc
+{
+  "status": "partial",
+  "reason": "Scored 1 returned submission(s); 2 still out and not counted in any total.",
+  "currency": "GBP",
+  "scored": 1, "awaiting": 2,
+  "total_cost": 24.88, "total_profit": 620.32, "roi_pct": 2493.9,
+  "submissions": [{
+    "submission_id": "…", "reference": "SUB-2026-08-001", "company_code": "CGC",
+    "status": "returned", "returned_at": "2026-08-02T10:14:00",
+    "card_count": 1, "graded_count": 1,
+    "total_cost": 24.88, "total_value": 645.20,
+    "total_profit": 620.32, "roi_pct": 2493.9,
+    "mean_surprise": 0.5,          // positive: the grader was kinder than the model expected
+    "cards": [{
+      "card_id": "…", "name": "Umbreon VMAX 215/203",
+      "predicted_grade": 9.5, "actual_grade": 10, "surprise": 0.5,
+      "cost": 24.88,
+      "graded_value": 900.00,      // from that grade's own sales, or null
+      "net_if_sold": 645.20, "profit": 620.32,
+      "blockers": []
+    }],
+    "status_note": null
+  }]
+}
+```
+
+**Open submissions are counted, not scored.** A parcel still at the grader has no grades to compare,
+and averaging it in at zero would make every open submission look like a loss. It appears with
+`status_note` and is excluded from `total_cost`, `total_profit` and `roi_pct`.
+
+**A grade with no sales behind it cannot be valued.** `graded_value` is `null` with a blocker saying
+so, rather than falling back to a neighbouring grade's price.
+
+**`GET /api/analytics/filters`** → `[{ "key", "label", "description" }]`.
+
+**`GET /api/analytics/filters/{key}`** — query `batch_size`, `limit`. Unknown keys `404` and list
+the valid ones.
+
+`grade_now` · `grade_if_batch_filled` · `sell_raw` · `hold` · `high_upside` · `high_risk` ·
+`low_liquidity` · `declining` · `needs_data`
+
+Each filter is a predicate over figures the decision and market engines already produced — never a
+fresh definition of the same idea. `low_liquidity` uses the `minimum_liquidity_score` you
+configured, so the filter and the verdicts agree by construction; `declining` reads the trend
+block's direction.
+
+Where a figure is unknown the card does **not** match — an unknown risk is not a low risk, and a
+card with no trend behind it is not a falling one. Those cards are counted in `unclassified` so a
+short list is never mistaken for a complete one.
+
+```jsonc
+{
+  "key": "grade_now", "label": "Grade now",
+  "description": "Clears your bar on its own today.",
+  "status": "partial",
+  "reason": "3 card(s) could not be decided, so they were not tested against this filter.",
+  "currency": "GBP",
+  "matched": 4, "analysed": 12, "total_cards": 15, "unclassified": 3,
+  "card_ids": [ … ],
+  "items": [ /* the same Opportunity shape as /api/collection/decisions */ ]
+}
+```
 
 ---
 

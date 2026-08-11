@@ -53,6 +53,12 @@ class Opportunity:
     #: and ROI above are conditional, and a ranked list must show that.
     coverage: float = 0.0
     is_user_override: bool = False
+    #: Carried so that a list can be cut by how the market is behaving, not just
+    #: by the verdict. Without these, "hard to sell" and "declining" would have
+    #: to be guessed at from the decision, which is not what they mean.
+    liquidity_score: float | None = None
+    liquidity_band: str | None = None
+    trend_direction: str | None = None
 
 
 @dataclass
@@ -142,6 +148,9 @@ def analyse_collection(
                 net_raw_alternative=recommendation.net_raw_alternative,
                 coverage=recommendation.coverage,
                 is_user_override=recommendation.is_user_override,
+                liquidity_score=evaluated.liquidity.score,
+                liquidity_band=evaluated.liquidity.band,
+                trend_direction=evaluated.trend.direction,
             )
         )
 
