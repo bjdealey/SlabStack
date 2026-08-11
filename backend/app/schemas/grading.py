@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
+from app.enums import Severity
 from app.models import GradingCompany, GradingMembership, GradingTier, SellingCostProfile
 from app.money import to_major
 from app.schemas.common import ApiModel
@@ -145,6 +146,7 @@ class GradingCompanyOut(ApiModel):
     currency: str
     website: str | None
     market_recognition_score: float
+    strictness: float
     grade_scale_max: float
     supports_half_grades: bool
     supports_subgrades: bool
@@ -164,6 +166,7 @@ class GradingCompanyOut(ApiModel):
             currency=company.currency,
             website=company.website,
             market_recognition_score=company.market_recognition_score,
+            strictness=company.strictness,
             grade_scale_max=company.grade_scale_max,
             supports_half_grades=company.supports_half_grades,
             supports_subgrades=company.supports_subgrades,
@@ -193,6 +196,12 @@ class GradingCompanyWrite(ApiModel):
     currency: str = "GBP"
     website: str | None = None
     market_recognition_score: float = Field(default=5.0, ge=0, le=10)
+    strictness: float = Field(
+        default=0.0,
+        ge=-3,
+        le=3,
+        description="Grade points this company awards above (+) or below (-) the model baseline.",
+    )
     grade_scale_max: float = Field(default=10.0, gt=0)
     supports_half_grades: bool = False
     supports_subgrades: bool = False
@@ -269,6 +278,75 @@ class SellingProfileWrite(ApiModel):
     active: bool = True
     sort_order: int = 100
     notes: str | None = None
+
+
+class GradeRuleOut(ApiModel):
+    id: str
+    code: str
+    label: str
+    company_id: str | None
+    company_code: str | None = None
+    field: str
+    face: str | None
+    min_severity: str
+    max_grade: float | None
+    probability_multiplier: float | None
+    penalty_from_grade: float | None
+    notes: str | None
+    is_builtin: bool
+    active: bool
+    sort_order: int
+
+
+class GradeRuleWrite(ApiModel):
+    """A defect cap or probability adjustment.
+
+    These are SlabStack's estimates, not any grader's published standard, which
+    is why they are editable rows rather than code.
+    """
+
+    code: str = Field(min_length=1, max_length=64)
+    label: str = Field(min_length=1, max_length=160)
+    company_id: str | None = Field(
+        default=None, description="Null applies the rule to every company."
+    )
+    field: str = Field(
+        min_length=1,
+        max_length=64,
+        description="An assessment defect field, or a group such as `corner_any`.",
+    )
+    face: str | None = Field(default="any", description="front | back | any")
+    min_severity: str = Severity.MINOR.value
+    max_grade: float | None = Field(default=None, ge=0, le=10)
+    probability_multiplier: float | None = Field(default=None, ge=0, le=1)
+    penalty_from_grade: float | None = Field(default=None, ge=0, le=10)
+    notes: str | None = None
+    active: bool = True
+    sort_order: int = 100
+
+    @field_validator("min_severity")
+    @classmethod
+    def _valid_severity(cls, value: str) -> str:
+        if value not in Severity.values():
+            raise ValueError(f"min_severity must be one of {Severity.values()}")
+        return value
+
+    @field_validator("face")
+    @classmethod
+    def _valid_face(cls, value: str | None) -> str | None:
+        if value is not None and value not in {"front", "back", "any"}:
+            raise ValueError("face must be front, back or any")
+        return value
+
+    @model_validator(mode="after")
+    def _has_an_effect(self) -> GradeRuleWrite:
+        if self.max_grade is None and self.probability_multiplier is None:
+            raise ValueError(
+                "A rule must do something: set max_grade, probability_multiplier, or both."
+            )
+        if self.probability_multiplier is not None and self.penalty_from_grade is None:
+            raise ValueError("probability_multiplier needs penalty_from_grade to apply from.")
+        return self
 
 
 class DataSourceOut(ApiModel):

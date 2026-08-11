@@ -22,6 +22,15 @@ from app.models import AppSetting
 
 SettingType = Literal["string", "number", "integer", "boolean", "money", "percent", "enum", "json"]
 
+# Kept here rather than imported from the model to avoid a circular import: the
+# prediction service reads its parameters from this module.
+DEFAULT_GRADE_WEIGHTS: dict[str, float] = {
+    "centering": 0.25,
+    "corners": 0.25,
+    "edges": 0.20,
+    "surface": 0.30,
+}
+
 
 @dataclass(frozen=True)
 class SettingDefinition:
@@ -200,6 +209,86 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
         maximum=20,
         description="Percentage of total declared value charged to insure the parcel.",
     ),
+    # --- Grade model (Phase 2) ---------------------------------------------
+    # Our estimates, not any grader's published standard. Exposed so a user who
+    # disagrees can say so rather than working around the model.
+    SettingDefinition(
+        key="grade_model_weights",
+        label="Condition weighting",
+        type="json",
+        default=dict(DEFAULT_GRADE_WEIGHTS),
+        category="grade_model",
+        description="How much each sub-score counts toward the estimated grade.",
+    ),
+    SettingDefinition(
+        key="grade_model_worst_weight",
+        label="Weight on the worst attribute",
+        type="number",
+        default=0.45,
+        category="grade_model",
+        minimum=0,
+        maximum=1,
+        description=(
+            "How much the weakest sub-score pulls the estimate down. At 0 the grade is a "
+            "plain average, which lets three perfect attributes hide one bad one."
+        ),
+    ),
+    SettingDefinition(
+        key="grade_model_base_sigma",
+        label="Grader inconsistency",
+        type="number",
+        default=0.45,
+        category="grade_model",
+        minimum=0.05,
+        maximum=3,
+        description=(
+            "Spread that remains even on a fully assessed card, because the same card "
+            "submitted twice does not always come back the same grade."
+        ),
+    ),
+    SettingDefinition(
+        key="grade_model_unknown_sigma",
+        label="Spread added by an unfinished assessment",
+        type="number",
+        default=1.6,
+        category="grade_model",
+        minimum=0,
+        maximum=5,
+        description="Applied in proportion to how much of the assessment is unanswered.",
+    ),
+    SettingDefinition(
+        key="grade_model_disagreement_factor",
+        label="Spread added when sub-scores disagree",
+        type="number",
+        default=0.25,
+        category="grade_model",
+        minimum=0,
+        maximum=2,
+        advanced=True,
+        description="A 10/10/10/6 card is less predictable than a 9/9/9/9 card.",
+    ),
+    SettingDefinition(
+        key="grade_model_max_sigma",
+        label="Maximum spread",
+        type="number",
+        default=3.0,
+        category="grade_model",
+        minimum=0.5,
+        maximum=6,
+        advanced=True,
+    ),
+    SettingDefinition(
+        key="grade_model_min_probability",
+        label="Drop grades below this probability",
+        type="number",
+        default=0.005,
+        category="grade_model",
+        minimum=0,
+        maximum=0.2,
+        advanced=True,
+        description="Keeps the distribution readable by trimming negligible tails.",
+    ),
+
     # --- Market analysis (used from Phase 3) -------------------------------
     SettingDefinition(
         key="market_window_days",
@@ -321,6 +410,18 @@ def _validate(definition: SettingDefinition, value: Any) -> None:
             raise ValueError(f"{definition.key} must be >= {definition.minimum}")
         if definition.maximum is not None and value > definition.maximum:
             raise ValueError(f"{definition.key} must be <= {definition.maximum}")
+
+    if definition.key == "grade_model_weights":
+        if not isinstance(value, dict):
+            raise ValueError("grade_model_weights must be an object")
+        missing = set(DEFAULT_GRADE_WEIGHTS) - set(value)
+        if missing:
+            raise ValueError(f"grade_model_weights is missing {sorted(missing)}")
+        weights = [float(value[key]) for key in DEFAULT_GRADE_WEIGHTS]
+        if any(weight < 0 for weight in weights):
+            raise ValueError("grade_model_weights cannot be negative")
+        if sum(weights) <= 0:
+            raise ValueError("grade_model_weights must not all be zero")
 
     if definition.key == "decision_score_weights":
         if not isinstance(value, dict):

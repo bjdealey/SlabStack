@@ -17,17 +17,27 @@ from datetime import UTC, date, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.enums import DEFECT_FIELDS, BlockStatus, Confidence, Decision, Severity
+from app.enums import (
+    DEFECT_FIELDS,
+    BlockStatus,
+    Confidence,
+    Decision,
+    PredictionKind,
+    PredictionSource,
+    Severity,
+)
 from app.models import Card, GradingCompany, MarketPrice, MarketSale
 from app.money import to_major
 from app.schemas.evaluation import (
     ENGINE_VERSION,
     CardEvaluation,
+    CompanyGradePrediction,
     ConditionBlock,
     ConditionScoreOut,
     ExpectedOutcomesBlock,
     ExplanationItem,
     GradePredictionBlock,
+    GradeProbability,
     GradingOption,
     GradingOptionsBlock,
     LiquidityBlock,
@@ -36,7 +46,14 @@ from app.schemas.evaluation import (
     RecommendationBlock,
     TrendBlock,
 )
-from app.services import cards_service, condition_service, settings_service
+from app.services import (
+    cards_service,
+    condition_service,
+    prediction_service,
+    predictions,
+    settings_service,
+)
+from app.services.prediction_service import ModelParameters, NotEnoughAssessmentError
 
 PHASE_GRADE_PREDICTION = 2
 PHASE_MARKET = 3
@@ -140,6 +157,158 @@ def _build_condition_block(db: Session, card: Card) -> ConditionBlock:
     )
 
 
+def _to_probabilities(raw: dict[str, float], company_code: str | None) -> list[GradeProbability]:
+    items = [
+        GradeProbability(
+            grade=float(grade),
+            label=f"{company_code} {grade}" if company_code else f"Grade {grade}",
+            probability=float(probability),
+        )
+        for grade, probability in raw.items()
+    ]
+    return sorted(items, key=lambda item: item.grade, reverse=True)
+
+
+def _build_grade_prediction_block(
+    db: Session, card: Card, settings_values: dict
+) -> GradePredictionBlock:
+    """Grade probabilities, recomputed from the current assessment.
+
+    Computed rather than read back from storage, so the numbers can never lag
+    behind a reassessment. ``POST /grade-prediction`` is what persists a run,
+    for history and for Phase 8 to score later. A prediction the user has
+    overridden wins over the model's (spec section 35).
+    """
+    assessment = cards_service.current_condition(db, card.id)
+    if assessment is None:
+        return GradePredictionBlock(
+            status=BlockStatus.NOT_ASSESSED.value,
+            reason=_NOT_ASSESSED_REASON,
+        )
+
+    params = ModelParameters.from_settings(settings_values)
+    try:
+        physical = prediction_service.predict(
+            assessment,
+            company=None,
+            rules=prediction_service.load_rules(db, None),
+            params=params,
+            kind=PredictionKind.PHYSICAL.value,
+        )
+    except NotEnoughAssessmentError as exc:
+        return GradePredictionBlock(
+            status=BlockStatus.INSUFFICIENT_DATA.value,
+            reason=str(exc),
+        )
+
+    overrides = {
+        row.company_id: row
+        for row in predictions.current_predictions(db, card.id)
+        if row.source == PredictionSource.USER_OVERRIDE.value
+    }
+
+    by_company: list[CompanyGradePrediction] = []
+    for company in predictions.companies_for_prediction(db, settings_values):
+        override = overrides.get(company.id)
+        if override is not None:
+            by_company.append(
+                CompanyGradePrediction(
+                    company_id=company.id,
+                    company_code=company.code,
+                    company_name=company.name,
+                    probabilities=_to_probabilities(override.probabilities or {}, company.code),
+                    likely_grade=override.likely_grade,
+                    grade_min=override.grade_min,
+                    grade_max=override.grade_max,
+                    max_grade_cap=override.max_grade_cap,
+                    confidence=override.confidence,
+                    caps_applied=[],
+                    is_user_override=True,
+                )
+            )
+            continue
+
+        result = prediction_service.predict(
+            assessment,
+            company=company,
+            rules=prediction_service.load_rules(db, company.id),
+            params=params,
+            kind=PredictionKind.MARKET.value,
+        )
+        by_company.append(
+            CompanyGradePrediction(
+                company_id=company.id,
+                company_code=company.code,
+                company_name=company.name,
+                probabilities=_to_probabilities(result.probabilities, company.code),
+                likely_grade=result.likely_grade,
+                grade_min=result.grade_min,
+                grade_max=result.grade_max,
+                max_grade_cap=result.max_grade_cap,
+                confidence=result.confidence,
+                caps_applied=[cap["label"] for cap in result.caps_applied],
+                is_user_override=False,
+            )
+        )
+
+    if not by_company:
+        return GradePredictionBlock(
+            status=BlockStatus.INSUFFICIENT_DATA.value,
+            reason="No active grading company is configured to predict against.",
+            physical=CompanyGradePrediction(
+                company_code="physical",
+                probabilities=_to_probabilities(physical.probabilities, None),
+                likely_grade=physical.likely_grade,
+                grade_min=physical.grade_min,
+                grade_max=physical.grade_max,
+                max_grade_cap=physical.max_grade_cap,
+                confidence=physical.confidence,
+            ),
+        )
+
+    headline = by_company[0]
+    completeness = float(assessment.completeness or 0.0)
+    status = BlockStatus.OK.value if completeness >= 0.6 else BlockStatus.PARTIAL.value
+
+    return GradePredictionBlock(
+        status=status,
+        reason=(
+            None
+            if status == BlockStatus.OK.value
+            else (
+                f"Only {completeness:.0%} of the assessment is answered, so the range is wide. "
+                "Finish it to narrow the estimate."
+            )
+        ),
+        company_code=headline.company_code,
+        kind=PredictionKind.MARKET.value,
+        source=(
+            PredictionSource.USER_OVERRIDE.value
+            if headline.is_user_override
+            else PredictionSource.RULES_ENGINE.value
+        ),
+        probabilities=headline.probabilities,
+        likely_grade=headline.likely_grade,
+        grade_min=headline.grade_min,
+        grade_max=headline.grade_max,
+        max_grade_cap=headline.max_grade_cap,
+        confidence=headline.confidence,
+        caps_applied=headline.caps_applied,
+        physical=CompanyGradePrediction(
+            company_code="physical",
+            probabilities=_to_probabilities(physical.probabilities, None),
+            likely_grade=physical.likely_grade,
+            grade_min=physical.grade_min,
+            grade_max=physical.grade_max,
+            max_grade_cap=physical.max_grade_cap,
+            confidence=physical.confidence,
+        ),
+        by_company=by_company,
+        model_version=physical.model_version,
+        base_grade=physical.base_grade,
+    )
+
+
 def _build_grading_options_block(db: Session, card: Card, settings_values: dict) -> GradingOptionsBlock:
     """Which grading routes exist at all, from configuration alone.
 
@@ -238,15 +407,7 @@ def evaluate_card(db: Session, card: Card) -> CardEvaluation:
     condition_block = _build_condition_block(db, card)
     options_block = _build_grading_options_block(db, card, settings_values)
 
-    grade_block = GradePredictionBlock(
-        status=BlockStatus.NOT_IMPLEMENTED.value,
-        phase=PHASE_GRADE_PREDICTION,
-        reason=(
-            _NOT_ASSESSED_REASON
-            if condition_block.status == BlockStatus.NOT_ASSESSED.value
-            else "The grade probability model arrives with the condition engine."
-        ),
-    )
+    grade_block = _build_grade_prediction_block(db, card, settings_values)
 
     market_block = MarketBlock(
         status=BlockStatus.INSUFFICIENT_DATA.value,
@@ -270,7 +431,9 @@ def evaluate_card(db: Session, card: Card) -> CardEvaluation:
         reason="Expected value needs grade probabilities and graded market prices.",
     )
 
-    explanation, blockers = _explain(card, condition_block, options_block, sale_count)
+    explanation, blockers = _explain(
+        card, condition_block, grade_block, options_block, sale_count
+    )
     recommendation = _recommend(card, blockers, explanation)
 
     return CardEvaluation(
@@ -296,6 +459,7 @@ def evaluate_card(db: Session, card: Card) -> CardEvaluation:
 def _explain(
     card: Card,
     condition_block: ConditionBlock,
+    grade_block: GradePredictionBlock,
     options_block: GradingOptionsBlock,
     sale_count: int,
 ) -> tuple[list[ExplanationItem], list[str]]:
@@ -340,7 +504,30 @@ def _explain(
                     detail="; ".join(condition_block.notable_defects[:4]),
                 )
             )
-        blockers.append("Run the grade probability model (Phase 2).")
+
+    if grade_block.status in {BlockStatus.OK.value, BlockStatus.PARTIAL.value}:
+        top = grade_block.probabilities[0] if grade_block.probabilities else None
+        span = f"{grade_block.grade_min:g}–{grade_block.grade_max:g}"
+        detail = f"{top.label} at {top.probability:.0%}, range {span}." if top is not None else None
+        items.append(
+            ExplanationItem(
+                kind="pass" if grade_block.status == BlockStatus.OK.value else "warn",
+                text=f"Likely {grade_block.company_code} {grade_block.likely_grade:g} "
+                f"({grade_block.confidence} confidence).",
+                detail=detail,
+            )
+        )
+        if grade_block.caps_applied:
+            items.append(
+                ExplanationItem(
+                    kind="warn",
+                    text=f"Capped at {grade_block.max_grade_cap:g} by "
+                    f"{len(grade_block.caps_applied)} rule(s).",
+                    detail="; ".join(grade_block.caps_applied[:3]),
+                )
+            )
+        if grade_block.status == BlockStatus.PARTIAL.value:
+            blockers.append("Finish the condition assessment to narrow the grade estimate.")
 
     if sale_count:
         items.append(

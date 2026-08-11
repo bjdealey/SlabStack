@@ -23,7 +23,13 @@ import type {
   Page,
 } from '@/lib/types'
 import fixtures from './fixtures.json'
-import { buildCatalogKey, buildEvaluation, buildSummary, buildAssessment } from './engine'
+import {
+  DEMO_RULES,
+  buildAssessment,
+  buildCatalogKey,
+  buildEvaluation,
+  buildSummary,
+} from './engine'
 import { SEED_CARDS } from './seed'
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO === 'true'
@@ -340,6 +346,38 @@ function route(method: string, pathname: string, params: URLSearchParams, body: 
     [method === 'GET' && pathname === '/variants', () => fixtures.variants],
     [method === 'GET' && pathname === '/groups', () => fixtures.groups],
     [method === 'GET' && pathname === '/grading/companies', () => store.companies],
+    [
+      method === 'GET' && pathname === '/grading/rules',
+      () =>
+        DEMO_RULES.map((rule) => ({
+          id: rule.code,
+          code: rule.code,
+          label: rule.label,
+          company_id: null,
+          company_code: null,
+          field: rule.field,
+          face: 'any',
+          min_severity: rule.minSeverity,
+          max_grade: rule.maxGrade ?? null,
+          probability_multiplier: rule.multiplier ?? null,
+          penalty_from_grade: rule.fromGrade ?? null,
+          notes: null,
+          is_builtin: true,
+          active: rule.active !== false,
+          sort_order: 100,
+        })),
+    ],
+    [
+      method === 'PATCH' && at(0) === 'grading' && at(1) === 'rules',
+      () => {
+        const rule = DEMO_RULES.find((item) => item.code === at(2))
+        if (!rule) return fail('not_found', `Grade rule '${at(2)}' was not found.`, 404)
+        const changes = payload as { max_grade?: number; active?: boolean }
+        if (changes.max_grade !== undefined) rule.maxGrade = changes.max_grade
+        if (changes.active !== undefined) rule.active = changes.active
+        return { ...rule, id: rule.code }
+      },
+    ],
     [method === 'GET' && pathname === '/selling-profiles', () => fixtures.sellingProfiles],
     [method === 'GET' && pathname === '/data-sources', () => fixtures.dataSources],
     [

@@ -26,32 +26,38 @@ Delivered beyond the minimum, because later phases depend on it:
 
 ---
 
-## Phase 2 — Condition engine
+## Phase 2 — Condition engine ✅
 
-**Have:** the assessment table, the four sub-scores, `grade_rules` seeded with 15 configurable
-caps and multipliers, and `grade_predictions` ready to store distributions.
+Grade probabilities from a condition assessment. A rules engine plus a spread model, in
+`app/services/prediction_service.py`, with every constant either a row or a setting.
 
-**Build:**
+- Central estimate blends the weighted mean of the sub-scores with the **worst** of them, so one
+  bad attribute is not hidden behind three good ones
+- Spread grows with unanswered fields, with disagreement between sub-scores, and never drops below
+  a floor for grader inconsistency — the model has no point estimates
+- `grade_rules` apply as hard caps or as multipliers on the top of the range
+- Discretised over each company's own ladder, so half grades appear only where they are awarded
+- `physical` and `market` predictions kept distinct, per spec section 8
+- Rules editor and model parameters in Settings; per-company `strictness`, shipped neutral
+- User overrides win over the model and survive a rerun
 
-1. The rules engine: apply `grade_rules` to an assessment to produce a hard cap and probability
-   adjustments.
-2. A base distribution from the sub-scores, per company (companies grade differently — that is what
-   `grading_companies.supports_half_grades` and the per-company rule rows are for).
-3. Keep `kind: physical` and `kind: market` predictions distinct, as the spec requires.
-4. `POST /api/cards/{id}/grade-prediction` returns a real distribution; the evaluation block starts
-   reporting `ok`.
-5. A rules editor in Settings — these are *our* estimates and must stay tunable.
-6. User override of any distribution, with both numbers retained.
+Two things it refuses: predicting from an assessment with nothing answered, and treating an
+unanswered field as perfect.
 
-**Watch for:** a card with 40% of its assessment filled in must produce a wide distribution with
-low confidence, not a confident one from partial evidence.
+**Learned the hard way:** the bottom of the grade ladder must not absorb the whole lower tail. It
+made a card capped at 3 report "probably a 1" whenever the spread was wide. Caught by driving the
+UI, not by the unit tests — they all used complete assessments, where the spread is small.
 
 ---
 
-## Phase 3 — Market data
+## Phase 3 — Market data ← next
 
 **Have:** `market_sales`, `market_listings`, `market_prices`, `price_snapshots`, `data_sources`,
-and the `MarketDataProvider` interface.
+and the `MarketDataProvider` interface. Grade probabilities now exist too, so the moment graded
+prices land, expected value becomes computable.
+
+**Smallest useful slice:** manual and CSV sales import. No provider, no API key, no terms review —
+and it is what turns the dashboard's "not calculated" into numbers.
 
 **Build:**
 

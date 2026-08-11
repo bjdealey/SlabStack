@@ -12,7 +12,7 @@ no outbound network call in this build.
 
 ---
 
-## Status: Phase 1 (Foundation)
+## Status: Phases 1–2
 
 | Delivered                                                                     |
 | ----------------------------------------------------------------------------- |
@@ -21,10 +21,11 @@ no outbound network call in this build.
 | Card CRUD, free-text search, filters, sorting, pagination, bulk add, per-copy split |
 | Front/back image upload with content validation and thumbnails                |
 | Structured condition assessment (16 defects × 2 faces + centering) with derived sub-scores |
+| **Grade probability model** — a distribution per grading company, with configurable defect rules |
 | Configuration-driven grading companies, tiers, memberships and selling profiles |
 | `evaluate_card` — the decision envelope the whole UI renders                  |
 | React dashboard, collection view, card detail page and settings               |
-| 154 backend tests, contract guards, clean lint, verified end-to-end in a browser |
+| 200 backend tests, contract guards, clean lint, verified end-to-end in a browser |
 
 Blocks that need later engines report `not_implemented` or `insufficient_data` with the phase that
 delivers them and a reason you can act on. **Nothing returns an invented number.** See
@@ -192,7 +193,7 @@ One call returns everything needed to decide, and the UI only visualises it:
 {
   "raw": { … },               // identity, ownership, the raw value in use
   "condition": { … },         // sub-scores, completeness, notable defects
-  "grade_prediction": { … },  // Phase 2
+  "grade_prediction": { … },  // a distribution per grading company
   "market": { … },            // Phase 3
   "liquidity": { … },         // Phase 3
   "trend": { … },             // Phase 3
@@ -215,6 +216,12 @@ it today keeps working as they land.
 confidence. A card with two sales in nine months does not get the same presentation as one with
 thirty-seven in ninety days. Where a figure cannot be calculated it is `null` with a reason, never
 `0`: a zero reads as "no upside" rather than "not calculated".
+
+**No invented grades.** The model never returns a point estimate, because graders are not
+deterministic — the same card submitted twice can come back a 9 and a 10. It refuses to predict
+from an assessment with nothing answered, and never treats an unanswered field as perfect: a
+half-finished assessment produces a wide range and says so. Its defect rules are SlabStack's
+estimates, not any grader's published standard, which is why they are editable rows.
 
 **No invented prices.** Grading tiers are seeded `active` only where the price can be attributed —
 CGC and ACE from the figures in the specification, flagged for you to verify. PSA ships as tier

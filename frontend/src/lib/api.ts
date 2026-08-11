@@ -12,6 +12,7 @@ import type {
   DataSource,
   EnumsResponse,
   Facets,
+  GradeRule,
   GradingCompany,
   Group,
   HealthResponse,
@@ -196,8 +197,23 @@ export const api = {
       body: JSON.stringify({ card_ids: cardIds }),
     }),
 
+  // --- Predictions ---------------------------------------------------------
+  runPrediction: (cardId: string) =>
+    request<unknown[]>(`/cards/${cardId}/grade-prediction`, { method: 'POST' }),
+
   // --- Configuration -------------------------------------------------------
   listGradingCompanies: () => request<GradingCompany[]>('/grading/companies'),
+  updateCompany: (companyId: string, payload: Record<string, unknown>) =>
+    request<GradingCompany>(`/grading/companies/${companyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  listGradeRules: () => request<GradeRule[]>('/grading/rules'),
+  updateGradeRule: (ruleId: string, payload: Record<string, unknown>) =>
+    request<GradeRule>(`/grading/rules/${ruleId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   updateTier: (tierId: string, payload: Record<string, unknown>) =>
     request<unknown>(`/grading/tiers/${tierId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   listSellingProfiles: () => request<SellingProfile[]>('/selling-profiles'),
@@ -221,6 +237,7 @@ export const keys = {
   variants: ['variants'] as const,
   groups: ['groups'] as const,
   companies: ['grading-companies'] as const,
+  gradeRules: ['grade-rules'] as const,
   sellingProfiles: ['selling-profiles'] as const,
   dataSources: ['data-sources'] as const,
   settings: ['settings'] as const,

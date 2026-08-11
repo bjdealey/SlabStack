@@ -261,6 +261,7 @@ export interface GradingCompany {
   currency: string
   website: string | null
   market_recognition_score: number
+  strictness: number
   grade_scale_max: number
   supports_half_grades: boolean
   supports_subgrades: boolean
@@ -371,17 +372,59 @@ export interface ConditionBlock extends EvaluationBlock {
   notable_defects: string[]
 }
 
-export interface GradePredictionBlock extends EvaluationBlock {
-  company_code: string | null
-  kind: string | null
-  source: string | null
-  probabilities: { grade: number; label: string; probability: number }[]
+export interface GradeProbability {
+  grade: number
+  label: string
+  probability: number
+}
+
+export interface CompanyGradePrediction {
+  company_id: string | null
+  company_code: string
+  company_name: string | null
+  probabilities: GradeProbability[]
   likely_grade: number | null
   grade_min: number | null
   grade_max: number | null
   max_grade_cap: number | null
   confidence: Confidence
   caps_applied: string[]
+  is_user_override: boolean
+}
+
+export interface GradePredictionBlock extends EvaluationBlock {
+  company_code: string | null
+  kind: string | null
+  source: string | null
+  probabilities: GradeProbability[]
+  likely_grade: number | null
+  grade_min: number | null
+  grade_max: number | null
+  max_grade_cap: number | null
+  confidence: Confidence
+  caps_applied: string[]
+  physical: CompanyGradePrediction | null
+  by_company: CompanyGradePrediction[]
+  model_version: string | null
+  base_grade: number | null
+}
+
+export interface GradeRule {
+  id: string
+  code: string
+  label: string
+  company_id: string | null
+  company_code: string | null
+  field: string
+  face: string | null
+  min_severity: Severity
+  max_grade: number | null
+  probability_multiplier: number | null
+  penalty_from_grade: number | null
+  notes: string | null
+  is_builtin: boolean
+  active: boolean
+  sort_order: number
 }
 
 export interface MarketValueRow {

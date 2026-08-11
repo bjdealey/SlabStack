@@ -15,6 +15,7 @@ import type {
   Card,
   CardEvaluation,
   CollectionSummary,
+  CompanyGradePrediction,
   ConditionAssessment,
   ConditionWrite,
   ExplanationItem,
@@ -252,6 +253,286 @@ export function buildCatalogKey(card: Partial<Card>): string {
   ]
   if (!card.card_number) parts.splice(3, 0, slug(card.name))
   return parts.join('|')
+}
+
+// --- Grade model -------------------------------------------------------------
+// Mirrors app/services/prediction_service.py. See that module for why each step
+// exists; this is a port, not a second design.
+
+const SEVERITY_RANK: Record<string, number> = { none: 0, minor: 1, moderate: 2, severe: 3 }
+
+const MODEL = {
+  weights: { centering: 0.25, corners: 0.25, edges: 0.2, surface: 0.3 } as Record<string, number>,
+  worstWeight: 0.45,
+  baseSigma: 0.45,
+  unknownSigma: 1.6,
+  disagreementFactor: 0.25,
+  maxSigma: 3.0,
+  minProbability: 0.005,
+}
+
+export interface DemoRule {
+  code: string
+  label: string
+  field: string
+  minSeverity: string
+  maxGrade?: number
+  multiplier?: number
+  fromGrade?: number
+  active?: boolean
+}
+
+/** The seeded rules from app/services/seed.py, in the same order. */
+export const DEMO_RULES: DemoRule[] = [
+  { code: 'crease_severe', label: 'Severe crease', field: 'creases', minSeverity: 'severe', maxGrade: 3 },
+  { code: 'crease_moderate', label: 'Major crease', field: 'creases', minSeverity: 'moderate', maxGrade: 5 },
+  { code: 'crease_minor', label: 'Light crease or bend', field: 'creases', minSeverity: 'minor', maxGrade: 7 },
+  { code: 'dent_moderate', label: 'Visible dent', field: 'dents', minSeverity: 'moderate', maxGrade: 7 },
+  { code: 'whitening_severe', label: 'Heavy whitening', field: 'whitening', minSeverity: 'severe', maxGrade: 8 },
+  { code: 'whitening_minor', label: 'Minor whitening', field: 'whitening', minSeverity: 'minor', multiplier: 0.75, fromGrade: 10 },
+  { code: 'corner_severe', label: 'Severe corner damage', field: 'corner_any', minSeverity: 'severe', maxGrade: 6 },
+  { code: 'corner_moderate', label: 'Moderate corner wear', field: 'corner_any', minSeverity: 'moderate', maxGrade: 8 },
+  { code: 'surface_severe', label: 'Severe surface damage', field: 'surface_condition', minSeverity: 'severe', maxGrade: 6 },
+  { code: 'scratches_minor', label: 'Surface scratches', field: 'scratches', minSeverity: 'minor', multiplier: 0.8, fromGrade: 10 },
+  { code: 'print_lines_moderate', label: 'Print lines', field: 'print_lines', minSeverity: 'moderate', multiplier: 0.6, fromGrade: 9 },
+  { code: 'silvering_moderate', label: 'Silvering', field: 'silvering', minSeverity: 'moderate', multiplier: 0.7, fromGrade: 9 },
+  { code: 'edge_severe', label: 'Severe edge wear', field: 'edge_condition', minSeverity: 'severe', maxGrade: 7 },
+  { code: 'staining_moderate', label: 'Staining', field: 'staining', minSeverity: 'moderate', maxGrade: 6 },
+  { code: 'holo_severe', label: 'Severe holo damage', field: 'holo_condition', minSeverity: 'severe', maxGrade: 8 },
+]
+
+const FIELD_GROUPS: Record<string, readonly string[]> = {
+  corner_any: ['corner_tl', 'corner_tr', 'corner_bl', 'corner_br'],
+}
+
+function normalCdf(x: number, mean: number, sigma: number): number {
+  if (sigma <= 0) return x < mean ? 0 : 1
+  // Abramowitz & Stegun 7.1.26 — erf is not in the JS standard library.
+  const z = (x - mean) / (sigma * Math.SQRT2)
+  const sign = z < 0 ? -1 : 1
+  const t = 1 / (1 + 0.3275911 * Math.abs(z))
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-z * z)
+  return 0.5 * (1 + sign * y)
+}
+
+function observedSeverity(assessment: ConditionAssessment, field: string): string | null {
+  const fields = FIELD_GROUPS[field] ?? [field]
+  let worst: string | null = null
+  for (const face of ['front', 'back'] as const) {
+    for (const name of fields) {
+      const value = (assessment[face] as unknown as Record<string, string>)[name]
+      if (!(value in SEVERITY_RANK)) continue
+      if (worst === null || SEVERITY_RANK[value] > SEVERITY_RANK[worst]) worst = value
+    }
+  }
+  return worst
+}
+
+function predictGrade(
+  assessment: ConditionAssessment,
+  company: GradingCompany | null,
+): CompanyGradePrediction & { baseGrade: number } {
+  const entries = Object.entries(MODEL.weights)
+    .map(([key, weight]) => {
+      const score = assessment.scores[key as keyof typeof assessment.scores] as number | null
+      return score === null || score === undefined ? null : { score, weight }
+    })
+    .filter((item): item is { score: number; weight: number } => item !== null)
+
+  const scores = entries.map((item) => item.score)
+  const totalWeight = entries.reduce((sum, item) => sum + item.weight, 0)
+  const mean = totalWeight
+    ? entries.reduce((sum, item) => sum + item.score * item.weight, 0) / totalWeight
+    : scores.reduce((sum, score) => sum + score, 0) / Math.max(scores.length, 1)
+  const worst = Math.min(...scores)
+  let centre = (1 - MODEL.worstWeight) * mean + MODEL.worstWeight * worst
+  const baseGrade = centre
+
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length
+  const disagreement =
+    scores.length > 1
+      ? Math.sqrt(scores.reduce((sum, s) => sum + (s - average) ** 2, 0) / scores.length)
+      : 0
+  const completeness = assessment.scores.completeness ?? 0
+  const sigma = Math.min(
+    MODEL.baseSigma + (1 - completeness) * MODEL.unknownSigma + disagreement * MODEL.disagreementFactor,
+    MODEL.maxSigma,
+  )
+
+  const caps: string[] = []
+  let cap: number | null = null
+  const multipliers: { multiplier: number; fromGrade: number }[] = []
+  for (const rule of DEMO_RULES) {
+    if (rule.active === false) continue
+    const severity = observedSeverity(assessment, rule.field)
+    if (!severity || SEVERITY_RANK[severity] === 0) continue
+    if (SEVERITY_RANK[severity] < SEVERITY_RANK[rule.minSeverity]) continue
+    if (rule.maxGrade !== undefined) {
+      cap = cap === null ? rule.maxGrade : Math.min(cap, rule.maxGrade)
+      caps.push(rule.label)
+    }
+    if (rule.multiplier !== undefined && rule.fromGrade !== undefined) {
+      multipliers.push({ multiplier: rule.multiplier, fromGrade: rule.fromGrade })
+    }
+  }
+  if (cap !== null) centre = Math.min(centre, cap)
+  if (company?.strictness) centre += company.strictness
+
+  const step = company?.supports_half_grades ? 0.5 : 1
+  const top = company?.grade_scale_max ?? 10
+  const ladder: number[] = []
+  for (let value = 1; value <= top + 1e-9; value += step) ladder.push(Number(value.toFixed(1)))
+
+  // The top grade absorbs everything above it; the bottom grade deliberately
+  // does not absorb everything below it, or a capped card would report the
+  // lowest grade as its most likely outcome. See the Python module for why.
+  const weights = new Map<number, number>()
+  ladder.forEach((grade, index) => {
+    const low = grade - step / 2
+    const high = index === ladder.length - 1 ? Infinity : grade + step / 2
+    const lower = normalCdf(low, centre, sigma)
+    const upper = high === Infinity ? 1 : normalCdf(high, centre, sigma)
+    weights.set(grade, Math.max(0, upper - lower))
+  })
+
+  if (cap !== null) {
+    for (const grade of weights.keys()) if (grade > cap + 1e-9) weights.set(grade, 0)
+  }
+  for (const { multiplier, fromGrade } of multipliers) {
+    for (const [grade, value] of weights) {
+      if (grade >= fromGrade - 1e-9) weights.set(grade, value * multiplier)
+    }
+  }
+
+  const normalise = (source: Map<number, number>) => {
+    const total = [...source.values()].reduce((sum, value) => sum + value, 0)
+    if (total <= 0) return new Map([...source.keys()].map((g) => [g, 1 / source.size]))
+    return new Map([...source].map(([g, v]) => [g, v / total]))
+  }
+
+  let probabilities = normalise(weights)
+  const trimmed = new Map([...probabilities].filter(([, v]) => v >= MODEL.minProbability))
+  probabilities = normalise(trimmed.size ? trimmed : probabilities)
+
+  const sorted = [...probabilities].sort((a, b) => b[0] - a[0])
+  const likely = sorted.reduce((best, item) => (item[1] > best[1] ? item : best), sorted[0])
+
+  // Narrowest run of adjacent grades holding 80% of the mass.
+  let range: [number, number] = [sorted[sorted.length - 1][0], sorted[0][0]]
+  let width = Infinity
+  for (let start = 0; start < sorted.length; start++) {
+    let total = 0
+    for (let end = start; end < sorted.length; end++) {
+      total += sorted[end][1]
+      if (total >= 0.8 - 1e-9) {
+        const span = sorted[start][0] - sorted[end][0]
+        if (span < width) {
+          width = span
+          range = [sorted[end][0], sorted[start][0]]
+        }
+        break
+      }
+    }
+  }
+
+  const confidence: CompanyGradePrediction['confidence'] =
+    completeness >= 0.9 && sigma <= MODEL.baseSigma + 0.35
+      ? 'high'
+      : completeness >= 0.6
+        ? 'medium'
+        : completeness >= 0.25
+          ? 'low'
+          : 'none'
+
+  return {
+    company_id: company?.id ?? null,
+    company_code: company?.code ?? 'physical',
+    company_name: company?.name ?? null,
+    probabilities: sorted.map(([grade, probability]) => ({
+      grade,
+      label: company ? `${company.code} ${grade}` : `Grade ${grade}`,
+      probability,
+    })),
+    likely_grade: likely[0],
+    grade_min: range[0],
+    grade_max: range[1],
+    max_grade_cap: cap,
+    confidence,
+    caps_applied: caps,
+    is_user_override: false,
+    baseGrade,
+  }
+}
+
+function buildGradePrediction(
+  assessment: ConditionAssessment | undefined,
+  companies: GradingCompany[],
+): CardEvaluation['grade_prediction'] {
+  const empty = {
+    company_code: null,
+    kind: null,
+    source: null,
+    probabilities: [],
+    likely_grade: null,
+    grade_min: null,
+    grade_max: null,
+    max_grade_cap: null,
+    confidence: 'none' as const,
+    caps_applied: [],
+    physical: null,
+    by_company: [],
+    model_version: null,
+    base_grade: null,
+  }
+
+  if (!assessment) {
+    return { status: 'not_assessed', reason: 'No condition assessment recorded yet.', phase: null, ...empty }
+  }
+
+  const hasScores = Object.keys(MODEL.weights).some(
+    (key) => assessment.scores[key as keyof typeof assessment.scores] !== null,
+  )
+  if (!hasScores) {
+    return {
+      status: 'insufficient_data',
+      reason: 'This assessment has no answered fields, so there is nothing to predict from.',
+      phase: null,
+      ...empty,
+    }
+  }
+
+  const active = companies.filter((company) => company.active)
+  const physical = predictGrade(assessment, null)
+  const byCompany = active.map((company) => predictGrade(assessment, company))
+  const headline = byCompany[0]
+  const completeness = assessment.scores.completeness ?? 0
+
+  return {
+    status: completeness >= 0.6 ? 'ok' : 'partial',
+    reason:
+      completeness >= 0.6
+        ? null
+        : `Only ${Math.round(completeness * 100)}% of the assessment is answered, so the range is wide. Finish it to narrow the estimate.`,
+    phase: null,
+    company_code: headline?.company_code ?? null,
+    kind: 'market',
+    source: 'rules_engine',
+    probabilities: headline?.probabilities ?? [],
+    likely_grade: headline?.likely_grade ?? null,
+    grade_min: headline?.grade_min ?? null,
+    grade_max: headline?.grade_max ?? null,
+    max_grade_cap: headline?.max_grade_cap ?? null,
+    confidence: headline?.confidence ?? 'none',
+    caps_applied: headline?.caps_applied ?? [],
+    physical,
+    by_company: byCompany,
+    model_version: 'rules-1.0-demo',
+    base_grade: Number(physical.baseGrade.toFixed(2)),
+  }
 }
 
 // Mirrors app/services/evaluation.py
@@ -503,23 +784,7 @@ export function buildEvaluation(
       },
       notable_defects: notable,
     },
-    grade_prediction: {
-      status: 'not_implemented',
-      phase: 2,
-      reason: !assessment
-        ? 'No condition assessment recorded yet.'
-        : 'The grade probability model arrives with the condition engine.',
-      company_code: null,
-      kind: null,
-      source: null,
-      probabilities: [],
-      likely_grade: null,
-      grade_min: null,
-      grade_max: null,
-      max_grade_cap: null,
-      confidence: 'none',
-      caps_applied: [],
-    },
+    grade_prediction: buildGradePrediction(assessment, companies),
     market: {
       status: 'insufficient_data',
       phase: 3,

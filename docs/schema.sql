@@ -94,6 +94,7 @@ CREATE TABLE grading_companies (
 	currency VARCHAR(3) NOT NULL, 
 	website VARCHAR(255), 
 	market_recognition_score FLOAT NOT NULL, 
+	strictness FLOAT NOT NULL, 
 	grade_scale_max FLOAT NOT NULL, 
 	supports_half_grades BOOLEAN NOT NULL, 
 	supports_subgrades BOOLEAN NOT NULL, 

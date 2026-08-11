@@ -15,6 +15,7 @@ from app.api.deps import CompanyDep, DbSession
 from app.api.errors import ConflictError, NotFoundError
 from app.models import (
     DataSource,
+    GradeRule,
     GradingCompany,
     GradingMembership,
     GradingSubmission,
@@ -24,6 +25,8 @@ from app.models import (
 from app.money import to_minor
 from app.schemas.grading import (
     DataSourceOut,
+    GradeRuleOut,
+    GradeRuleWrite,
     GradingCompanyOut,
     GradingCompanyWrite,
     GradingMembershipOut,
@@ -303,6 +306,80 @@ def _enforce_single_default(db: DbSession, profile: SellingCostProfile) -> None:
     for other in db.scalars(select(SellingCostProfile).where(SellingCostProfile.id != profile.id)):
         other.is_default = False
     db.flush()
+
+
+# ---------------------------------------------------------------------------
+# Grade rules
+# ---------------------------------------------------------------------------
+
+
+def _rule_out(rule: GradeRule, codes: dict[str, str]) -> GradeRuleOut:
+    out = GradeRuleOut.model_validate(rule)
+    out.company_code = codes.get(rule.company_id or "")
+    return out
+
+
+@router.get(
+    "/grading/rules",
+    response_model=list[GradeRuleOut],
+    summary="List grade rules",
+    description=(
+        "Defect caps and probability adjustments used by the grade model. These are "
+        "SlabStack's estimates, not any grader's published standard — edit them freely."
+    ),
+)
+def list_rules(db: DbSession, include_inactive: bool = True) -> list[GradeRuleOut]:
+    stmt = select(GradeRule).order_by(GradeRule.sort_order, GradeRule.code)
+    if not include_inactive:
+        stmt = stmt.where(GradeRule.active.is_(True))
+    codes = {company.id: company.code for company in db.scalars(select(GradingCompany))}
+    return [_rule_out(rule, codes) for rule in db.scalars(stmt)]
+
+
+@router.post(
+    "/grading/rules",
+    response_model=GradeRuleOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a grade rule",
+)
+def create_rule(db: DbSession, payload: GradeRuleWrite) -> GradeRuleOut:
+    if db.scalars(select(GradeRule).where(GradeRule.code == payload.code)).first():
+        raise ConflictError(f"A rule with code '{payload.code}' already exists.")
+    rule = GradeRule(**payload.model_dump())
+    db.add(rule)
+    db.flush()
+    codes = {company.id: company.code for company in db.scalars(select(GradingCompany))}
+    return _rule_out(rule, codes)
+
+
+@router.patch("/grading/rules/{rule_id}", response_model=GradeRuleOut, summary="Update a grade rule")
+def update_rule(db: DbSession, rule_id: str, payload: GradeRuleWrite) -> GradeRuleOut:
+    rule = db.get(GradeRule, rule_id)
+    if rule is None:
+        raise NotFoundError("Grade rule", rule_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(rule, field, value)
+    db.flush()
+    codes = {company.id: company.code for company in db.scalars(select(GradingCompany))}
+    return _rule_out(rule, codes)
+
+
+@router.delete(
+    "/grading/rules/{rule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a grade rule",
+)
+def delete_rule(db: DbSession, rule_id: str) -> Response:
+    rule = db.get(GradeRule, rule_id)
+    if rule is None:
+        raise NotFoundError("Grade rule", rule_id)
+    if rule.is_builtin:
+        raise ConflictError(
+            "Built-in rules cannot be deleted — deactivate it instead, so it can be restored."
+        )
+    db.delete(rule)
+    db.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------
