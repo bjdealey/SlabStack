@@ -89,10 +89,17 @@ def test_incomplete_assessment_is_flagged_partial(client: TestClient, card: dict
 
 def test_unbuilt_blocks_name_the_phase_that_delivers_them(client: TestClient, card: dict):
     body = client.get(f"/api/cards/{card['id']}/evaluation").json()
-    assert body["grade_prediction"]["phase"] == 2
     assert body["market"]["phase"] == 3
     assert body["expected_outcomes"]["phase"] == 5
-    assert body["grade_prediction"]["reason"]
+    assert body["market"]["reason"]
+
+
+def test_grade_prediction_waits_for_an_assessment_not_a_phase(client: TestClient, card: dict):
+    """It is built now, so an unassessed card is missing evidence, not features."""
+    block = client.get(f"/api/cards/{card['id']}/evaluation").json()["grade_prediction"]
+    assert block["status"] == "not_assessed"
+    assert block["phase"] is None
+    assert block["reason"]
 
 
 def test_grading_options_come_from_configuration(client: TestClient, card: dict):

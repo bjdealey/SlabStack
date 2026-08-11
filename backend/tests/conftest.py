@@ -54,6 +54,26 @@ def db() -> Iterator[SessionLocal]:
 
 
 @pytest.fixture
+def seeded_db() -> Iterator[SessionLocal]:
+    """A session with reference data present.
+
+    ``db`` alone is empty: seeding normally happens at app startup, which only
+    the ``client`` fixture triggers. Tests that exercise services directly —
+    the grade model against real grading companies and rules — need the rows
+    without going through HTTP.
+    """
+    from app.services import seed
+
+    session = SessionLocal()
+    try:
+        seed.seed_all(session)
+        session.commit()
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture
 def sample_image() -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", (734, 1024), color=(30, 90, 160)).save(buffer, format="JPEG")

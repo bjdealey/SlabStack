@@ -88,7 +88,27 @@ class GradeProbability(ApiModel):
     probability: float
 
 
+class CompanyGradePrediction(ApiModel):
+    """One grader's distribution. Companies differ, so they are not merged."""
+
+    company_id: str | None = None
+    company_code: str
+    company_name: str | None = None
+    probabilities: list[GradeProbability] = Field(default_factory=list)
+    likely_grade: float | None = None
+    grade_min: float | None = None
+    grade_max: float | None = None
+    max_grade_cap: float | None = None
+    confidence: str = Confidence.NONE.value
+    caps_applied: list[str] = Field(default_factory=list)
+    is_user_override: bool = False
+
+
 class GradePredictionBlock(EvaluationBlock):
+    """The headline fields describe the first company in scope; ``by_company``
+    carries every grader, and ``physical`` the company-agnostic view of the card
+    itself (spec section 8 keeps those two questions apart)."""
+
     company_code: str | None = None
     kind: str | None = None
     source: str | None = None
@@ -99,6 +119,13 @@ class GradePredictionBlock(EvaluationBlock):
     max_grade_cap: float | None = None
     confidence: str = Confidence.NONE.value
     caps_applied: list[str] = Field(default_factory=list)
+
+    physical: CompanyGradePrediction | None = None
+    by_company: list[CompanyGradePrediction] = Field(default_factory=list)
+    model_version: str | None = None
+    base_grade: float | None = Field(
+        default=None, description="Weighted mean of the condition sub-scores, before any rules."
+    )
 
 
 class MarketValueRow(ApiModel):

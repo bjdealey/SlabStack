@@ -177,9 +177,7 @@ class TestConditionApi:
         )
         assert response.status_code == 422
 
-    def test_grade_prediction_is_honestly_unimplemented(self, client: TestClient, card: dict):
+    def test_grade_prediction_needs_an_assessment_first(self, client: TestClient, card: dict):
         response = client.post(f"/api/cards/{card['id']}/grade-prediction")
-        assert response.status_code == 501
-        body = response.json()["error"]
-        assert body["code"] == "not_implemented"
-        assert body["details"]["phase"] == 2
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "no_assessment"

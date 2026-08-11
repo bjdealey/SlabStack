@@ -46,6 +46,11 @@ class GradingCompany(Base, TimestampMixin):
     # 0-10. How readily the market accepts this slab; feeds the liquidity-aware
     # tie-break in spec section 26. A default, not a fact — user-editable.
     market_recognition_score: Mapped[float] = mapped_column(Float, nullable=False, default=5.0)
+    # Grade points this company is assumed to award above (+) or below (-) the
+    # model's baseline. Ships at 0.0 for every company on purpose: we make no
+    # claim about who grades harder. The user tunes it from their own returned
+    # submissions, and Phase 8 can calibrate it from prediction_results.
+    strictness: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     grade_scale_max: Mapped[float] = mapped_column(Float, nullable=False, default=10.0)
     supports_half_grades: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     supports_subgrades: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
