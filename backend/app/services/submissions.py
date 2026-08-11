@@ -34,7 +34,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.enums import CostAllocationMethod, DeclaredValueSource
+from app.enums import CostAllocationMethod, DeclaredValueSource, PredictionSource
 from app.models import (
     Card,
     GradingCompany,
@@ -49,6 +49,7 @@ from app.services import (
     cards_service,
     economics,
     prediction_service,
+    predictions,
     settings_service,
 )
 
@@ -58,6 +59,7 @@ __all__ = [
     "TierGroup",
     "cost_submission",
     "declared_value_for",
+    "predicted_grade_for",
 ]
 
 
@@ -222,6 +224,54 @@ def _probabilities_for(
     except prediction_service.NotEnoughAssessmentError:
         return None
     return prediction.probabilities
+
+
+def predicted_grade_for(db: Session, card_id: str, company: GradingCompany | None) -> float | None:
+    """The grade the model expects from this grader, as of right now.
+
+    Written when the card joins the parcel rather than read back when it
+    returns, and that ordering is the whole point. The prediction being scored
+    has to be the one you actually held when you sent the card off; recomputing
+    it later would grade a model against an outcome it has already seen, which
+    measures nothing. It is a snapshot, so it is stored rather than derived.
+
+    ``None`` when the card has no assessment, which is honest: no prediction was
+    made, so there is nothing to be right or wrong about.
+    """
+    if company is None:
+        return None
+    card = db.get(Card, card_id)
+    if card is None:  # pragma: no cover - callers check first
+        return None
+    assessment = cards_service.current_condition(db, card_id)
+    if assessment is None:
+        return None
+
+    # A user override outranks the model, because it is what the user believed.
+    override = next(
+        (
+            row
+            for row in predictions.current_predictions(db, card_id)
+            if row.company_id == company.id
+            and row.source == PredictionSource.USER_OVERRIDE.value
+        ),
+        None,
+    )
+    if override is not None:
+        return override.likely_grade
+
+    try:
+        prediction = prediction_service.predict(
+            assessment,
+            company=company,
+            rules=prediction_service.load_rules(db, company.id),
+            params=prediction_service.ModelParameters.from_settings(
+                settings_service.get_all(db)
+            ),
+        )
+    except prediction_service.NotEnoughAssessmentError:
+        return None
+    return prediction.likely_grade
 
 
 def _held_membership(company: GradingCompany, today: date) -> GradingMembership | None:

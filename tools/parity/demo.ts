@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import type { DecisionInputs } from '@/lib/demo/decision'
 import { decide, evaluateRoute, thresholdsFrom } from '@/lib/demo/decision'
 import { allocateWeighted } from '@/lib/demo/submissions'
+import { suggestedListingMinor } from '@/lib/demo/analytics'
 
 interface ParityCase {
   name: string
@@ -24,6 +25,13 @@ interface ParityCase {
   settings: Record<string, unknown>
 }
 
+interface ListingCase {
+  name: string
+  realisticMinor: number | null
+  highQuartileMinor: number | null
+  liquidityScore: number | null
+}
+
 interface AllocationCase {
   name: string
   totalMinor: number
@@ -31,8 +39,11 @@ interface AllocationCase {
 }
 
 const here = dirname(fileURLToPath(import.meta.url))
-const { cases, allocations } = JSON.parse(readFileSync(join(here, 'cases.json'), 'utf8')) as {
+const { cases, listings, allocations } = JSON.parse(
+  readFileSync(join(here, 'cases.json'), 'utf8'),
+) as {
   cases: ParityCase[]
+  listings: ListingCase[]
   allocations: AllocationCase[]
 }
 
@@ -93,6 +104,16 @@ const output = cases.map((testCase) => {
   }
 })
 
+/** The suggested asking price, which is arithmetic both sides do alone. */
+const listingOutput = listings.map((testCase) => {
+  const [asking, basis] = suggestedListingMinor(
+    testCase.realisticMinor,
+    testCase.highQuartileMinor,
+    testCase.liquidityScore,
+  )
+  return { name: testCase.name, asking_minor: asking, basis }
+})
+
 /** The split itself, where a penny is easiest to lose. */
 const allocationOutput = allocations.map((testCase) => {
   const parts = allocateWeighted(testCase.totalMinor, testCase.weights)
@@ -101,5 +122,9 @@ const allocationOutput = allocations.map((testCase) => {
 })
 
 console.log(
-  JSON.stringify({ decisions: output, allocations: allocationOutput }, null, 2),
+  JSON.stringify(
+    { decisions: output, listings: listingOutput, allocations: allocationOutput },
+    null,
+    2,
+  ),
 )

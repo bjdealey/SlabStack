@@ -15,12 +15,20 @@ field:
 make parity
 ```
 
-`cases.json` holds two sets of hand-built scenarios.
+`cases.json` holds three sets of hand-built scenarios.
 
 **`cases`** exercise the decision engine's branches — a well-evidenced grade, a
 card where only the top grade has ever sold, both risk tolerances, and a route
 that loses money. Each is fed to `decision.evaluate_route` + `decision.decide`
 on both sides, and every number, string, and per-grade row is compared.
+
+**`listings`** exercise the suggested asking price behind the selling queue —
+the one piece of arithmetic Phase 7 added that both sides implement alone. They
+cover each liquidity band, both boundaries between them, the upper-quartile cap
+firing, and the two cases where it must *not* fire: a quartile sitting below the
+realistic price, and one exactly equal to it. Capping there would suggest asking
+*less* than the card fetches. Two cases exist purely to catch a floor/round swap,
+following the lesson below.
 
 **`allocations`** exercise the penny-exact split behind submission costing,
 which is the other place two hand-written implementations drift. Several cases

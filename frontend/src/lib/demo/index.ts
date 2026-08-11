@@ -37,11 +37,18 @@ import {
   buildGradePrediction,
   buildSummary,
 } from './engine'
-import { suggestDeclaredValue } from './economics'
+import { netSaleValue, suggestDeclaredValue } from './economics'
 import * as market from './market'
 import { optimise } from './optimiser'
 import type { StoredLine, StoredSubmission } from './submissions'
 import { costSubmission, nextReference } from './submissions'
+import {
+  FILTERS,
+  applyFilter,
+  buildSellingQueue,
+  buildSubmissionReturns,
+  rankOpportunities,
+} from './analytics'
 import { SEED_CARDS, SEED_MARKET } from './seed'
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO === 'true'
@@ -208,7 +215,110 @@ function seedStore(): Store {
     )
     market.recompute(key, sales, seeded.prices, params, money)
   }
+  seedSubmissions(seeded)
   return seeded
+}
+
+/**
+ * One parcel already back, one still out.
+ *
+ * Without these the returns view has nothing to show, and "predicted 9.5, got
+ * 10" is the one thing on the analytics page no other screen says. The returned
+ * parcel deliberately holds a card that graded into a band nobody has sold, so
+ * the demo also shows the honest half: a slab that cost money and cannot be
+ * valued, and a return that is therefore a floor rather than an estimate.
+ */
+function seedSubmissions(seeded: Store): void {
+  const cgc = seeded.companies.find((item) => item.code === 'CGC')
+  const psa = seeded.companies.find((item) => item.code === 'PSA')
+  if (!cgc) return
+
+  const find = (name: string) => seeded.cards.find((card) => card.name === name)
+  const umbreon = find('Umbreon VMAX')
+  const promo = find('Eevee Heroes Promo 1')
+  const gengar = find('Gengar VMAX')
+
+  const day = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString()
+  const economy = cgc.tiers.find((tier) => tier.tier_name === 'Economy') ?? cgc.tiers[0] ?? null
+
+  const line = (
+    cardId: string,
+    order: number,
+    predicted: number | null,
+    actual: number | null,
+  ): StoredLine => ({
+    id: `demo-line-${cardId}-${order}`,
+    card_id: cardId,
+    tier_id: economy?.id ?? null,
+    declared_value_minor: null,
+    declared_value_source: 'system',
+    declared_value_confidence: null,
+    predicted_grade: predicted,
+    actual_grade: actual,
+    cert_number: actual === null ? null : `10${order}9944${order}`,
+    status: actual === null ? 'planned' : 'graded',
+    sort_order: order,
+    notes: null,
+  })
+
+  if (umbreon && promo) {
+    seeded.submissions.push({
+      id: 'demo-submission-returned',
+      reference: 'SUB-2026-05-001',
+      name: 'Spring bulk',
+      company_id: cgc.id,
+      tier_id: economy?.id ?? null,
+      status: 'returned',
+      currency: (seeded.settings.currency as string) ?? 'GBP',
+      cost_allocation_method:
+        (seeded.settings.cost_allocation_method as string) ?? 'value_weighted',
+      shipping_out_minor: 2000,
+      shipping_return_minor: 2000,
+      handling_minor: 0,
+      other_fees_minor: 0,
+      membership_allocation_minor: 0,
+      submitted_at: day(96),
+      received_at: day(88),
+      returned_at: day(34),
+      tracking_outbound: null,
+      tracking_return: null,
+      notes: null,
+      created_at: day(100),
+      cards: [
+        // Predicted 9.5 and came back a 10: the good surprise.
+        line(umbreon.id, 0, 9.5, 10),
+        // Predicted 9.5 and came back a 6. Nobody has sold a CGC 6 of it, so it
+        // cannot be valued — which is the point of including it.
+        line(promo.id, 1, 9.5, 6),
+      ],
+    })
+  }
+
+  if (gengar && psa) {
+    seeded.submissions.push({
+      id: 'demo-submission-open',
+      reference: 'SUB-2026-07-002',
+      name: 'Still at PSA',
+      company_id: psa.id,
+      tier_id: psa.tiers[0]?.id ?? null,
+      status: 'shipped',
+      currency: (seeded.settings.currency as string) ?? 'GBP',
+      cost_allocation_method: 'equal',
+      shipping_out_minor: 2000,
+      shipping_return_minor: 2000,
+      handling_minor: 0,
+      other_fees_minor: 0,
+      membership_allocation_minor: 0,
+      submitted_at: day(12),
+      received_at: null,
+      returned_at: null,
+      tracking_outbound: null,
+      tracking_return: null,
+      notes: null,
+      created_at: day(14),
+      cards: [line(gengar.id, 0, 9, null)],
+    })
+  }
 }
 
 /**
@@ -395,6 +505,66 @@ function evaluationFor(card: Card, batchSize = 1): CardEvaluation {
 const GRADING_DECISIONS = new Set(['grade', 'grade_if_batch_filled'])
 
 /**
+ * The analytics adapters.
+ *
+ * Each one gathers what the ported engine needs and hands off; none of them
+ * computes a figure of its own. That mirrors the server, where analytics is a
+ * view over answers other engines already gave.
+ */
+function minimumLiquidity(): number {
+  const base = Number(store.settings.minimum_liquidity_score ?? 3) || 3
+  const risk = String(store.settings.risk_tolerance ?? 'balanced')
+  if (risk === 'conservative') return base + 1.5
+  if (risk === 'aggressive') return Math.max(0, base - 1)
+  return base
+}
+
+function sellingQueue() {
+  return buildSellingQueue(collectionDecisions(1), (cardId) => {
+    const card = store.cards.find((item) => item.id === cardId)
+    const summary = card ? summaryFor(card) : null
+    const raw = summary?.prices.find((price) => price.grade_label === 'raw') ?? null
+    return {
+      realisticMinor:
+        raw === null
+          ? null
+          : market.toMinor(raw.realistic_sale ?? raw.median ?? 0) || null,
+      highQuartileMinor: raw?.high_quartile ? market.toMinor(raw.high_quartile) : null,
+      confidence: raw?.confidence ?? 'none',
+      liquidityScore: summary?.liquidity.score ?? null,
+      liquidityBand: summary?.liquidity.band ?? null,
+      daysSinceLastSale: summary?.liquidity.days_since_last_sale ?? null,
+      trendDirection: summary?.trend.direction ?? null,
+      purchasePrice: card?.purchase_price ?? null,
+    }
+  })
+}
+
+function submissionReturns() {
+  const profile = sellingProfile()
+  return buildSubmissionReturns(
+    currency(),
+    store.submissions.map((stored) => {
+      const submission = costed(stored)
+      return {
+        submission,
+        gradedValueMinor: (cardId: string, grade: number) => {
+          const card = store.cards.find((item) => item.id === cardId)
+          if (!card || !submission.company_code) return null
+          const label = market.gradeLabel(submission.company_code, grade)
+          const price = store.prices.find(
+            (row) => row.catalog_key === card.catalog_key && row.grade_label === label,
+          )
+          if (!price) return null
+          return market.toMinor(price.realistic_sale ?? price.median ?? 0) || null
+        },
+        netOf: (grossMinor: number) => netSaleValue(grossMinor, profile, true)?.netMinor ?? null,
+      }
+    }),
+  )
+}
+
+/**
  * The decision engine across the whole collection (spec sections 32, 37).
  *
  * Only cards that can actually be decided are evaluated — a card with no
@@ -454,6 +624,9 @@ function collectionDecisions(batchSize: number): CollectionDecisions {
       net_raw_alternative: recommendation.net_raw_alternative,
       coverage: recommendation.coverage,
       is_user_override: recommendation.is_user_override,
+      liquidity_score: evaluated.liquidity.score,
+      liquidity_band: evaluated.liquidity.band,
+      trend_direction: evaluated.trend.direction,
     })
 
     // Only cards the engine would actually grade contribute to the totals.
@@ -555,7 +728,27 @@ function requireEditable(submission: StoredSubmission): void {
   }
 }
 
-function newLine(cardId: string, tierId: string | null, order: number): StoredLine {
+/**
+ * The grade the model expects from this grader, right now.
+ *
+ * ``null`` when the card has no assessment, which is honest: no prediction was
+ * made, so there is nothing to be right or wrong about.
+ */
+function predictedGradeFor(cardId: string, companyId: string | null): number | null {
+  if (!companyId) return null
+  const company = store.companies.find((item) => item.id === companyId)
+  const assessment = store.conditions.get(cardId)
+  if (!company || !assessment) return null
+  const prediction = buildGradePrediction(assessment, [company])
+  return prediction.by_company[0]?.likely_grade ?? prediction.likely_grade ?? null
+}
+
+function newLine(
+  cardId: string,
+  tierId: string | null,
+  order: number,
+  companyId: string | null,
+): StoredLine {
   return {
     id: newId(),
     card_id: cardId,
@@ -563,6 +756,9 @@ function newLine(cardId: string, tierId: string | null, order: number): StoredLi
     declared_value_minor: null,
     declared_value_source: 'system',
     declared_value_confidence: null,
+    // Frozen now, not read back later: the prediction worth scoring is the one
+    // you held when you sent the card, not one computed after the grade is in.
+    predicted_grade: predictedGradeFor(cardId, companyId),
     actual_grade: null,
     cert_number: null,
     status: 'planned',
@@ -697,7 +893,7 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
         cards: store.cards.length,
         grading_companies: store.companies.length,
         market_sales: 0,
-        phase: '3 — market data (demo)',
+        phase: '7 — analytics (demo)',
       }),
     ],
     [method === 'GET' && pathname === '/meta/enums', () => fixtures.enums],
@@ -812,7 +1008,7 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
           if (!store.cards.some((card) => card.id === cardId)) {
             fail('not_found', `Card '${cardId}' was not found.`, 404)
           }
-          submission.cards.push(newLine(cardId, submission.tier_id, index))
+          submission.cards.push(newLine(cardId, submission.tier_id, index, submission.company_id))
         })
         store.submissions.push(submission)
         return costed(submission)
@@ -925,7 +1121,7 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
             fail('not_found', `Card '${cardId}' was not found.`, 404)
           }
           if (existing.has(cardId)) continue
-          submission.cards.push(newLine(cardId, tierId, order))
+          submission.cards.push(newLine(cardId, tierId, order, submission.company_id))
           order += 1
         }
         return costed(submission)
@@ -970,6 +1166,32 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
     [
       method === 'GET' && pathname === '/collection/decisions',
       () => collectionDecisions(Number(params.get('batch_size') ?? 1) || 1),
+    ],
+    [
+      method === 'GET' && pathname === '/analytics/opportunities',
+      () => rankOpportunities(collectionDecisions(Number(params.get('batch_size') ?? 1) || 1)),
+    ],
+    [method === 'GET' && pathname === '/analytics/selling-queue', () => sellingQueue()],
+    [method === 'GET' && pathname === '/analytics/submission-returns', () => submissionReturns()],
+    [method === 'GET' && pathname === '/analytics/filters', () => FILTERS],
+    [
+      method === 'GET' && at(0) === 'analytics' && at(1) === 'filters' && segments.length === 3,
+      () => {
+        try {
+          return applyFilter(
+            at(2),
+            collectionDecisions(Number(params.get('batch_size') ?? 1) || 1),
+            minimumLiquidity(),
+          )
+        } catch {
+          return fail(
+            'not_found',
+            `'${at(2)}' is not a collection filter. Available: ${FILTERS.map((f) => f.key).join(', ')}.`,
+            404,
+            { key: at(2), available: FILTERS.map((f) => f.key) },
+          )
+        }
+      },
     ],
     [
       method === 'GET' && pathname === '/collection/summary',

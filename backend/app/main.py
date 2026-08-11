@@ -16,6 +16,7 @@ from sqlalchemy import inspect
 
 from app.api.errors import register_exception_handlers
 from app.api.routes import (
+    analytics,
     cards,
     catalog,
     collection,
@@ -145,6 +146,7 @@ api.include_router(groups.router)
 api.include_router(grading.router)
 api.include_router(market.router)
 api.include_router(submissions.router)
+api.include_router(analytics.router)
 api.include_router(phases.router)
 app.include_router(api)
 

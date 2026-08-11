@@ -43,15 +43,6 @@ def refresh_market() -> None:
     )
 
 
-@router.get("/analytics/opportunities", summary="Best grading opportunities (Phase 7)")
-def opportunities() -> None:
-    _stub(
-        "Ranked grading opportunities need the decision engine's expected-profit numbers.",
-        phase=7,
-        planned_in="Phase 7 — analytics: opportunities, raw selling queue, submission ROI.",
-    )
-
-
 @router.get("/analytics/accuracy", summary="Predicted vs actual grading accuracy (Phase 8)")
 def accuracy() -> None:
     _stub(

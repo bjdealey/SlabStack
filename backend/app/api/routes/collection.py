@@ -61,6 +61,9 @@ class OpportunityOut(ApiModel):
     net_raw_alternative: float | None = None
     coverage: float = 0.0
     is_user_override: bool = False
+    liquidity_score: float | None = None
+    liquidity_band: str | None = None
+    trend_direction: str | None = None
 
 
 class CollectionDecisionsOut(ApiModel):

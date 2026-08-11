@@ -224,15 +224,51 @@ ladder and its own slab prices, which is the rule the best-case panel already fo
 
 ---
 
-## Phase 7 — Analytics ← next
+## Phase 7 — Analytics ✅
 
-**Build:** ranked opportunities, the raw selling queue with suggested listing prices, price/volume/
-liquidity charts per card, submission ROI, and the one-click collection filters (grade now, grade
-if batch filled, sell raw, hold, high risk, high upside, low liquidity, undervalued, declining).
+**Built.** `analytics.py` plus `/api/analytics/*` and the Analytics page.
+
+The governing constraint, stated in the module's own docstring: **everything here is a view.** The
+decision engine says whether a card is worth grading, the market engine says what it is worth, the
+submission engine says what a parcel cost — analytics ranks, filters and compares those answers and
+never re-derives one of them. Two rankings of one question drift apart, and the one that goes stale
+is whichever the user was not looking at.
+
+- **Ranked opportunities** — the same verdicts as `/collection/decisions`, cut to what you would
+  actually send. `batch_size` changes the list, because a card that does not pay alone often pays
+  in a submission of twenty.
+- **A selling queue.** "Sell it raw" is where the decision engine stops; what to *ask* is the next
+  question. The markup over the realistic price scales with liquidity — 5% when it trades weekly,
+  18% when it trades twice a year and needs room — and is capped at the upper quartile of real
+  sales, because asking more than anyone has recently paid is how a listing sits unsold. A card
+  with no raw sales gets no suggested price and says why.
+- **Submission ROI** — predicted grades against the grades that came back. Parcels still out are
+  counted and reported rather than averaged in at zero, and a grade nobody has sold cannot be
+  valued and says so instead of borrowing a neighbouring grade's price.
+- **Nine saved cuts**, each a predicate over figures the engines already produced. Where a figure
+  is unknown the card does not match and is counted in `unclassified`: an unknown risk is not a low
+  risk, and a card with no trend behind it is not a falling one.
+
+**Two of those cuts were dishonest when first written.** "Hard to sell" read a decision value and
+"declining" read another, so neither measured what its own label promised. Both now read the
+liquidity and trend blocks, and "hard to sell" uses the minimum liquidity score *you* configured
+rather than a threshold invented here — so the filter and the verdicts agree by construction.
+
+**And a gap this phase exposed, again by driving the UI.** `submission_cards.predicted_grade` was a
+column nothing ever wrote, so the left-hand side of "predicted vs actual" was permanently null and
+the returns view could only ever show half a comparison. The prediction is now recorded when a card
+*joins* a parcel, not read back when it returns: the prediction worth scoring is the one you held
+when you sent the card, and recomputing it later would grade a model against an outcome it has
+already seen. Moving a draft to another grader re-takes it; a card with no assessment gets none,
+because no prediction was made and there is nothing to be right or wrong about.
+
+**Not built:** the per-card price/volume/liquidity chart. `price_snapshots`,
+`GET /api/cards/{id}/market/history` and `SnapshotSeries` all exist and are exercised; only the
+chart component is outstanding, and a demo store rebuilt on every page load has no history to plot.
 
 ---
 
-## Phase 8 — Learning system
+## Phase 8 — Learning system ← next
 
 **Build:** record actual grades into `prediction_results`, score predictions (Brier), surface the
 user's personal bias ("your predicted PSA 10 rate runs 14 points above your actual rate"), and feed

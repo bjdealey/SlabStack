@@ -696,6 +696,10 @@ export interface Opportunity {
   /** Below 1.0 the profit and ROI are conditional on landing a priced grade. */
   coverage: number
   is_user_override: boolean
+  /** Carried so a list can be cut by how the market behaves, not just the verdict. */
+  liquidity_score: number | null
+  liquidity_band: string | null
+  trend_direction: string | null
 }
 
 export interface CollectionDecisions {
@@ -1060,4 +1064,118 @@ export interface HealthResponse {
   grading_companies: number
   market_sales: number
   phase: string
+}
+
+/* --- Analytics ------------------------------------------------------------ */
+
+export interface RankedOpportunities {
+  status: BlockStatus
+  reason: string | null
+  currency: string
+  analysed: number
+  total_cards: number
+  actionable: number
+  expected_profit: number | null
+  total_grading_cost: number | null
+  items: Opportunity[]
+}
+
+export interface SellingCandidate {
+  card_id: string
+  name: string
+  set_label: string | null
+  decision: Decision
+  /** What the market says it fetches. */
+  realistic_sale: number | null
+  /** What you keep after fees and postage — the same figure the card page shows. */
+  net_proceeds: number | null
+  /** What to ask, which is not what it fetches. Null when nothing prices it. */
+  suggested_listing: number | null
+  listing_basis: string | null
+  liquidity_score: number | null
+  liquidity_band: string | null
+  days_since_last_sale: number | null
+  trend_direction: string | null
+  confidence: Confidence
+  purchase_price: number | null
+  /** Null when you never recorded what you paid. Unknown is not break-even. */
+  gain_vs_purchase: number | null
+  blockers: string[]
+}
+
+export interface SellingQueue {
+  status: BlockStatus
+  reason: string | null
+  currency: string
+  analysed: number
+  total_cards: number
+  total_net_proceeds: number | null
+  items: SellingCandidate[]
+  notes: string[]
+}
+
+export interface GradedCardResult {
+  card_id: string
+  name: string
+  predicted_grade: number | null
+  actual_grade: number | null
+  /** Positive when it graded better than predicted. */
+  surprise: number | null
+  cost: number | null
+  graded_value: number | null
+  net_if_sold: number | null
+  profit: number | null
+  blockers: string[]
+}
+
+export interface SubmissionReturn {
+  submission_id: string
+  reference: string
+  company_code: string | null
+  status: string
+  returned_at: string | null
+  card_count: number
+  graded_count: number
+  total_cost: number | null
+  total_value: number | null
+  total_profit: number | null
+  roi_pct: number | null
+  /** Positive means the grader was kinder than the model expected. */
+  mean_surprise: number | null
+  cards: GradedCardResult[]
+  status_note: string | null
+}
+
+export interface SubmissionReturns {
+  status: BlockStatus
+  reason: string | null
+  currency: string
+  scored: number
+  awaiting: number
+  total_cost: number | null
+  total_profit: number | null
+  roi_pct: number | null
+  submissions: SubmissionReturn[]
+}
+
+export interface CollectionFilter {
+  key: string
+  label: string
+  description: string
+}
+
+export interface FilterResult {
+  key: string
+  label: string
+  description: string
+  status: BlockStatus
+  reason: string | null
+  currency: string
+  matched: number
+  analysed: number
+  total_cards: number
+  /** Cards the engine could not decide. Unanswered is not "no". */
+  unclassified: number
+  card_ids: string[]
+  items: Opportunity[]
 }
