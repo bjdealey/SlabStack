@@ -327,7 +327,7 @@ DATA_SOURCES: tuple[dict, ...] = (
         "api_key_env_var": "SLABSTACK_POKEPRICE_API_KEY",
         "enabled": False,
         "priority": 30,
-        "notes": "Phase 3. Current and historical prices via the provider's API.",
+        "notes": "Needs a PokePrice account and API key. No adapter written yet.",
     },
     {
         "code": "pricecharting",
@@ -337,7 +337,10 @@ DATA_SOURCES: tuple[dict, ...] = (
         "api_key_env_var": "SLABSTACK_PRICECHARTING_API_KEY",
         "enabled": False,
         "priority": 40,
-        "notes": "Phase 3.",
+        "notes": (
+            "Sold prices including PSA 9/10 columns, which would fill the graded ladder the "
+            "catalogue sources cannot. Needs a paid API key. No adapter written yet."
+        ),
     },
     {
         "code": "ebay",
@@ -348,7 +351,11 @@ DATA_SOURCES: tuple[dict, ...] = (
         "enabled": False,
         "priority": 50,
         "terms_url": "https://developer.ebay.com/api-docs/static/ebay-rest-landing.html",
-        "notes": "Phase 3. Use the official API under its terms — do not scrape.",
+        "notes": (
+            "Real sold listings — the best fit for these engines, since liquidity and trend "
+            "need individual sales. Needs a developer app, and Marketplace Insights needs "
+            "separate approval. Official API only, under its terms: never scraped."
+        ),
     },
     {
         "code": "cardmarket",
@@ -358,7 +365,7 @@ DATA_SOURCES: tuple[dict, ...] = (
         "api_key_env_var": "SLABSTACK_CARDMARKET_TOKEN",
         "enabled": False,
         "priority": 60,
-        "notes": "Phase 3. Official API only.",
+        "notes": "Needs a Cardmarket account and OAuth credentials. Official API only.",
     },
     {
         "code": "tcgplayer",
@@ -368,7 +375,7 @@ DATA_SOURCES: tuple[dict, ...] = (
         "api_key_env_var": "SLABSTACK_TCGPLAYER_TOKEN",
         "enabled": False,
         "priority": 70,
-        "notes": "Phase 3. Official API only.",
+        "notes": "Needs partner approval from TCGplayer. Official API only.",
     },
     {
         "code": "pokemontcg_io",
@@ -416,8 +423,9 @@ VARIANTS: tuple[tuple[str, str, int], ...] = (
 )
 
 # --- Starter set catalogue ---------------------------------------------------
-# Small on purpose: a real catalogue arrives in Phase 3 from a card-catalogue
-# provider. This is just enough for search and card entry to feel alive.
+# Small on purpose. The real catalogue comes from a card-catalogue provider —
+# enable one and look a card up, and its set, number and rarity arrive with it.
+# These are enough for search and card entry to work with no source at all.
 SETS: tuple[tuple[str, str, str, str | None], ...] = (
     ("BS", "Base Set", "Original Series", "1999-01-09"),
     ("EVS", "Evolving Skies", "Sword & Shield", "2021-08-27"),

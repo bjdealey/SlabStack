@@ -1263,3 +1263,70 @@ export interface CalibrationState {
   max_offset: number
   companies: CalibrationEntry[]
 }
+
+/* --- Live market data ----------------------------------------------------- */
+
+export interface SourceState {
+  code: string
+  name: string
+  enabled: boolean
+  has_adapter: boolean
+  api_key_present: boolean
+  api_key_env_var: string | null
+  last_sync_at: string | null
+  last_sync_status: string | null
+  last_sync_error: string | null
+  terms_url: string | null
+  notes: string | null
+}
+
+export interface CardMatch {
+  external_id: string
+  name: string
+  set_name: string | null
+  set_code: string | null
+  card_number: string | null
+  rarity: string | null
+  language: string | null
+  image_url: string | null
+  /** Ordering only. A match is never applied without you confirming it. */
+  confidence: number
+}
+
+export interface CatalogLookup {
+  source_code: string
+  source_name: string
+  query: string | null
+  matches: CardMatch[]
+  status: string
+  reason: string | null
+}
+
+export interface CardSyncOutcome {
+  card_id: string
+  name: string
+  status: string
+  value: number | null
+  currency: string | null
+  /** What the provider quoted, before conversion. */
+  source_value: number | null
+  source_currency: string | null
+  /** Your rate from Settings, not a live one. */
+  fx_rate: number | null
+  reason: string | null
+}
+
+export interface SyncReport {
+  source_code: string
+  source_name: string
+  started_at: string
+  finished_at: string | null
+  requested: number
+  updated: number
+  skipped: number
+  failed: number
+  status: BlockStatus | string
+  reason: string | null
+  cards: CardSyncOutcome[]
+  notes: string[]
+}

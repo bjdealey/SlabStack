@@ -732,14 +732,94 @@ insure the slab for — and clearing it restores the engine's suggestion.
 | GET    | `/api/market/prices?catalog_key=…`          | ✅     | Derived valuations for an identity.            |
 | PUT    | `/api/market/prices/{price_id}/override`    | ✅     | Your own value, stored beside the computed one. |
 | POST   | `/api/market/recompute-all`                 | ✅     | Reprice every identity in the collection.      |
-| POST   | `/api/market/refresh`                       | ⏳ P3  | Fetch from a network provider — needs an API key. |
+| POST   | `/api/market/refresh`                       | ✅     | Fetch prices from every enabled provider.      |
+| PATCH  | `/api/data-sources/{code}`                  | ✅     | Enable or configure a source.                  |
+| GET    | `/api/catalog/lookup`                       | ✅     | Find a card in a provider's catalogue.         |
+| POST   | `/api/cards/{id}/catalog-link`              | ✅     | Confirm a catalogue match for a card.          |
 
 `/api/data-sources` reports `api_key_present` as a boolean and never returns a key value. Keys are
 read from named environment variables; the database stores only the variable's name.
 
-Every network provider ships disabled, and `/api/market/refresh` is the one market endpoint still
-returning a `501`. `manual` and `csv` are enabled, because they work with no network, no key and no
-terms of service — and they are what the application degrades to.
+Every network provider ships **disabled**. Enabling one is the moment this application first talks
+to the internet, so it is a decision the user takes rather than a default they discover, and
+`/api/market/refresh` returns `409` until they do. `manual` and `csv` are enabled, because they work
+with no network, no key and no terms of service — and they are what everything degrades to.
+
+### Live providers
+
+Only `pokemontcg_io` has an adapter. It was chosen because it is the only source a user can try with
+no signup, no approval and no payment: it answers anonymously, and a key only raises the ceiling.
+The rest are listed to show what is planned and **cannot be enabled** — `PATCH` returns `409`,
+because a switch with nothing behind it is worse than no switch.
+
+**What that source cannot do matters more than what it can**, and the API is shaped so this cannot
+be missed:
+
+| Engine | With this source | Why |
+| --- | --- | --- |
+| Valuation | An aggregate index, used only where you have no sales | It is TCGplayer's or Cardmarket's number, not a median of sales you could have made |
+| Liquidity | **Unknown** | Measured from how often a card trades; one price cannot say |
+| Trend | Accrues **forward only** | No history to import, so it is built from daily snapshots |
+| Grading decision | **Still unanswerable** | No graded prices at all — the decision is raw-versus-slab |
+
+A graded `MarketKey` returns `None` rather than the raw price. Answering it would put the same
+number on both sides of the grading decision and make grading look exactly break-even, every time.
+
+### Precedence
+
+`market_prices` is unique per `(catalog_key, grade_label, source_id)`, so a fetched price and one
+computed from your sales coexist. They are resolved to one row per grade, and **your own sales
+win** — a median from twenty-two real sales of this card is better evidence than a third party's
+index. `source_code` on a market row names where the number came from; `null` means your sales.
+
+An empty sale-derived row does not win: one left over from sales that were all later excluded has a
+zero sample and describes nothing.
+
+### Currency
+
+Providers quote USD and EUR; the app reports one currency. `fx_rates` is a setting keyed
+`{"USD_GBP": 0.79}` and defaults to empty. **A price with no configured rate is fetched, reported,
+and not written.** There is no live FX feed here and no sensible default: a wrong rate rescales
+every provider price silently, and the mistake would be invisible because the numbers still look
+like money. Every converted figure reports the rate it used.
+
+### Refresh
+
+`POST /api/market/refresh?card_id=…` returns one report per enabled source:
+
+```jsonc
+{
+  "source_code": "pokemontcg_io", "source_name": "Pokémon TCG API",
+  "started_at": "…", "finished_at": "…",
+  "requested": 12, "updated": 9, "skipped": 3, "failed": 0,
+  "status": "partial",
+  "reason": "Updated 9, skipped 3.",
+  "cards": [{
+    "card_id": "…", "name": "Umbreon VMAX 215/203", "status": "updated",
+    "value": 328.44, "currency": "GBP",
+    "source_value": 410.55, "source_currency": "USD",   // both, so the number is checkable
+    "fx_rate": 0.8,                                     // yours, from Settings
+    "reason": null
+  }],
+  "notes": [ … ]
+}
+```
+
+**A failure costs future updates, never history.** Nothing is cleared before a run, so a sync that
+breaks halfway leaves everything it had already written.
+
+### Catalogue lookup
+
+`GET /api/catalog/lookup?name=…&set_code=…&card_number=…` returns candidates and **writes nothing**.
+Confirming one is a separate `POST /api/cards/{id}/catalog-link`, because a confident API silently
+rewriting somebody's card is the exact failure this abstraction was shaped to prevent (spec §5).
+
+`apply_fields` names which catalogue values to accept — anything omitted is left as it was, so a
+lookup fills gaps rather than overwriting decisions. The provider's own id is stored in
+`cards.external_ids`, so later syncs price that exact card instead of re-searching by name and
+drifting onto a different printing.
+
+`confidence` is for ordering candidates and nothing else.
 
 ### Import
 

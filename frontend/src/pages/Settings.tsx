@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { api, ApiError, keys } from '@/lib/api'
 import type { GradeRule, GradingCompany, GradingTier, SettingDefinition } from '@/lib/types'
 import { PageHeader } from '@/components/AppShell'
+import { DataSources } from '@/components/DataSources'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Field, Input, Label, Select } from '@/components/ui/field'
@@ -52,7 +53,7 @@ export function Settings() {
             <SellingSettings />
           </TabsContent>
           <TabsContent value="sources" className="mt-5">
-            <DataSourceSettings />
+            <DataSources />
           </TabsContent>
         </Tabs>
       </div>
@@ -509,60 +510,6 @@ function SellingSettings() {
           </PanelBody>
         </Panel>
       ))}
-    </div>
-  )
-}
-
-function DataSourceSettings() {
-  const sources = useQuery({ queryKey: keys.dataSources, queryFn: api.listDataSources })
-  if (sources.isLoading) return <LoadingPanel />
-  if (sources.isError) return <ErrorState error={sources.error} />
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-line bg-surface-raised px-4 py-3 text-xs text-ink-muted">
-        The local database is the source of truth. Providers import into it — if one goes away, you keep
-        your collection, your price history and every past analysis. API keys are read from the
-        environment and never stored here.
-      </div>
-      <Panel className="overflow-x-auto">
-        <table className="w-full min-w-2xl text-sm">
-          <thead className="border-b border-line text-left text-xs uppercase tracking-wider text-ink-faint">
-            <tr>
-              <th className="px-4 py-3 font-medium">Source</th>
-              <th className="px-4 py-3 font-medium">Kind</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">API key</th>
-              <th className="px-4 py-3 font-medium">Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sources.data!.map((source) => (
-              <tr key={source.id} className="border-b border-line/60 last:border-0">
-                <td className="px-4 py-2.5 text-ink">{source.name}</td>
-                <td className="px-4 py-2.5 text-ink-muted">{humanise(source.kind)}</td>
-                <td className="px-4 py-2.5">
-                  {source.enabled ? (
-                    <Badge tone="positive">Enabled</Badge>
-                  ) : source.has_adapter ? (
-                    <Badge tone="outline">Disabled</Badge>
-                  ) : (
-                    <Badge tone="neutral">No adapter yet</Badge>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 text-xs text-ink-faint">
-                  {source.api_key_env_var
-                    ? source.api_key_present
-                      ? `${source.api_key_env_var} set`
-                      : `${source.api_key_env_var} not set`
-                    : 'Not required'}
-                </td>
-                <td className="max-w-md px-4 py-2.5 text-xs text-ink-faint">{source.notes}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Panel>
     </div>
   )
 }

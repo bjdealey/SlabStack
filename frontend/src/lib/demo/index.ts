@@ -96,6 +96,8 @@ interface Store {
   prices: MarketPrice[]
   listings: Map<string, number>
   submissions: StoredSubmission[]
+  /** Toggled in the UI, honoured nowhere: this tab has no network to enable. */
+  enabledSources: Record<string, boolean>
 }
 
 function blankCard(input: Partial<Card> & { name: string }, id?: string): Card {
@@ -212,6 +214,7 @@ function seedStore(): Store {
 
   const seeded: Store = {
     cards, conditions, companies, settings, sales, prices: [], listings, submissions: [],
+    enabledSources: {},
   }
   const params = market.paramsFromSettings(settings)
   const money = (settings.currency as string) ?? 'GBP'
@@ -578,6 +581,23 @@ function evaluationFor(card: Card, batchSize = 1): CardEvaluation {
 
 /** Decisions that mean money would actually be spent on grading. */
 const GRADING_DECISIONS = new Set(['grade', 'grade_if_batch_filled'])
+
+/**
+ * Data sources as the demo can honestly present them.
+ *
+ * The rows are real — same codes, same adapter flags — but every network source
+ * stays off, because there is no server in this tab to make a request from. A
+ * switch that flipped and did nothing would be worse than one that explains.
+ */
+function demoSources() {
+  return (fixtures.dataSources as { code: string; has_adapter?: boolean }[]).map((source) => ({
+    ...source,
+    enabled: store.enabledSources[source.code] ?? false,
+    last_sync_at: null,
+    last_sync_status: null,
+    last_sync_error: null,
+  }))
+}
 
 /**
  * The analytics adapters.
@@ -1057,7 +1077,7 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
         cards: store.cards.length,
         grading_companies: store.companies.length,
         market_sales: 0,
-        phase: '8 — learning (demo)',
+        phase: 'live market data (demo)',
       }),
     ],
     [method === 'GET' && pathname === '/meta/enums', () => fixtures.enums],
@@ -1109,7 +1129,50 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
       },
     ],
     [method === 'GET' && pathname === '/selling-profiles', () => fixtures.sellingProfiles],
-    [method === 'GET' && pathname === '/data-sources', () => fixtures.dataSources],
+    [method === 'GET' && pathname === '/data-sources', () => demoSources()],
+    [
+      method === 'PATCH' && at(0) === 'data-sources',
+      () => {
+        const source = demoSources().find((item) => item.code === at(1))
+        if (!source) fail('not_found', `Data source '${at(1)}' was not found.`, 404)
+        if (!source!.has_adapter && (payload as { enabled?: boolean }).enabled) {
+          fail(
+            'conflict',
+            `'${source!.code}' has no adapter, so enabling it would do nothing. Sources without ` +
+              'one are listed to show what is planned, not to be switched on.',
+            409,
+          )
+        }
+        // Recorded, but it changes nothing: there is no network in this tab to
+        // enable. Saying so is better than a switch that appears to work.
+        store.enabledSources[source!.code] = Boolean((payload as { enabled?: boolean }).enabled)
+        return { ...source!, enabled: store.enabledSources[source!.code] }
+      },
+    ],
+    [
+      method === 'GET' && pathname === '/catalog/lookup',
+      () => ({
+        source_code: 'pokemontcg_io',
+        source_name: 'Pokémon TCG API',
+        query: params.get('name'),
+        matches: [],
+        status: 'unavailable',
+        reason:
+          'The demo runs entirely in this browser tab, so it cannot reach a card catalogue. ' +
+          'Run SlabStack locally and enable a source to look cards up for real.',
+      }),
+    ],
+    [
+      method === 'POST' && pathname === '/market/refresh',
+      () =>
+        fail(
+          'conflict',
+          'The demo has no server and no network, so there is nothing to refresh from. This ' +
+            'works in the real app: enable a data source, link a card to the catalogue, and ' +
+            'prices are fetched into your own database.',
+          409,
+        ),
+    ],
     [
       method === 'PATCH' && at(0) === 'grading' && at(1) === 'tiers',
       () => {

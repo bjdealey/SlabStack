@@ -311,12 +311,55 @@ API took the ISO string straight to a `Date` column without parsing it.
 
 ---
 
+## Live market data ✅
+
+The first source that actually reaches the network: `pokemontcg_io`, behind
+`app/services/market_sync.py` and the adapter in `app/services/market_data/`.
+
+Chosen because it is the only source a user can try with **no signup, no approval and no payment** —
+it answers anonymously and a key only raises the ceiling. eBay and TCGplayer need an application
+review; PriceCharting and Cardmarket need paid or account credentials. Those rows stay listed, and
+now say what each actually needs rather than "Phase 3".
+
+- **Nothing reaches the internet until a source is enabled**, and `/api/market/refresh` returns 409
+  until one is. A source with no adapter cannot be enabled at all.
+- **Card lookup** comes with the catalogue: search returns candidates and writes nothing, confirming
+  is a separate call, and `apply_fields` names what to accept so a lookup fills gaps rather than
+  overwriting decisions. The provider's id is stored, so later syncs price that exact printing.
+- **Your own sales win.** `market_prices` was already unique per source, so the two coexist; they
+  are now resolved to one row per grade, and a provider price is used only where you have nothing
+  better. The card page says which.
+- **No invented exchange rate.** A foreign price with no configured rate is fetched, reported, and
+  not written — a guessed rate rescales every price silently and the mistake would be invisible.
+- **No deletion on failure.** Nothing is cleared before a run.
+
+**What this source cannot do is the important part**, and it is stated in the adapter, the API
+contract and the UI: no individual sales means liquidity stays **unknown**; no history means a trend
+accrues **forward only** from daily snapshots; and no graded prices means the grading decision is
+**still unanswerable** from it alone. A graded key returns nothing rather than the raw price —
+answering it would put the same number on both sides and make grading look exactly break-even every
+time. A source that filled the raw price and left the decision where it was would otherwise look
+like a fix.
+
+**Verified as far as this environment allows.** The sandbox cannot reach any provider host, so the
+adapter is tested against recorded fixtures through an injectable transport. That proves the
+documented shape parses correctly; it cannot prove the live API still returns it. Driving the UI did
+confirm the request is genuinely attempted and that a network failure surfaces as a real error
+rather than being swallowed. **The first live request is the verification, and it happens on the
+user's machine.**
+
+---
+
 ## What is left
 
-Two 501s remain, and both wait on an external service rather than on an engine:
-`POST /api/market/refresh` needs a market-data provider's credentials and its terms reviewed, and
-`POST /api/cards/identify` needs a `CardIdentificationProvider`. The interfaces and the disabled
-`data_sources` rows are already there.
+`POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,
+not an engine — and it will always be a suggestion the user confirms, never applied silently.
+
+A **sales-level** source is the biggest remaining gain. eBay's Marketplace Insights or
+PriceCharting's sold data would fill `market_sales` rather than an aggregate price row, which is
+what liquidity, trend and — via graded comparables — the grading decision actually need. The
+adapter interface and the sync engine already take them; each needs credentials and its terms
+reviewed.
 
 The per-card price/volume/liquidity chart is also outstanding — `price_snapshots`,
 `GET /api/cards/{id}/market/history` and `SnapshotSeries` all exist and are exercised; only the
