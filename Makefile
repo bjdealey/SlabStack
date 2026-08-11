@@ -24,6 +24,7 @@ help:
 	@echo "  make lint      Backend lint + frontend typecheck"
 	@echo "  make parity    Check the demo engine still agrees with the server"
 	@echo "  make check     Everything CI runs"
+	@echo "  make doctor    Diagnose why a live-data sync is not working"
 	@echo "  make schema    Regenerate docs/schema.sql from the models"
 	@echo "  make migrate   Apply Alembic migrations"
 
@@ -61,6 +62,11 @@ parity:
 check: test lint parity
 	cd frontend && npm run build
 	cd frontend && npm run build:demo
+
+# Walks the live-data chain and stops at the first thing blocking a sync.
+# "Nothing happened" has five causes that look identical from the UI.
+doctor:
+	cd backend && $(PY) -m scripts.doctor
 
 schema:
 	cd backend && $(PY) -m scripts.dump_schema

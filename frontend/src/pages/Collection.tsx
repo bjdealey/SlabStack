@@ -7,6 +7,7 @@ import { api, ApiError, keys, type CardListParams } from '@/lib/api'
 import type { Card, CardWrite } from '@/lib/types'
 import { PageHeader } from '@/components/AppShell'
 import { CardForm } from '@/components/CardForm'
+import { CardSearch } from '@/components/CardSearch'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -25,6 +26,14 @@ export function Collection() {
   const [debounced, setDebounced] = useState(search)
   const [view, setView] = useState<'grid' | 'table'>('grid')
   const [page, setPage] = useState(1)
+  // null = show the search step; an object = show the by-hand form.
+  const [prefill, setPrefill] = useState<Partial<CardWrite> | null>(null)
+
+  /** Always start at the catalogue search — the by-hand form is one click on. */
+  const openAdd = () => {
+    setPrefill(null)
+    setAdding(true)
+  }
   const [adding, setAdding] = useState(params.get('new') === '1')
 
   // Typing in a search box should not fire a request per keystroke.
@@ -116,7 +125,7 @@ export function Collection() {
                 <List className="size-4" />
               </button>
             </div>
-            <Button variant="primary" onClick={() => setAdding(true)}>
+            <Button variant="primary" onClick={openAdd}>
               Add a card
             </Button>
           </>
@@ -220,7 +229,7 @@ export function Collection() {
                   : 'Add your first card to get started.'
               }
               action={
-                <Button variant="primary" onClick={() => setAdding(true)}>
+                <Button variant="primary" onClick={openAdd}>
                   Add a card
                 </Button>
               }
@@ -257,16 +266,43 @@ export function Collection() {
         ) : null}
       </div>
 
-      <Dialog open={adding} onOpenChange={setAdding}>
+      <Dialog
+        open={adding}
+        onOpenChange={(open) => {
+          setAdding(open)
+          // Always reopen on search: the catalogue is the fast path, and the
+          // by-hand form is one click from it.
+          if (!open) setPrefill(null)
+        }}
+      >
         <DialogContent
           title="Add a card"
-          description="Only the name is required — everything else can be filled in later."
+          description={
+            prefill
+              ? 'By hand. Only the name is required — the rest can wait.'
+              : 'Search the catalogue, or enter it by hand.'
+          }
         >
-          <CardForm
-            onSubmit={(payload) => create.mutate(payload)}
-            onCancel={() => setAdding(false)}
-            submitting={create.isPending}
-          />
+          {prefill === null ? (
+            <CardSearch
+              onPick={(values, match) =>
+                // Straight in. Everything the catalogue knows is filled, and
+                // the provider link is set, so this card is priceable at once
+                // rather than after a second trip through Find in catalogue.
+                create.mutate({
+                  ...(values as CardWrite),
+                  external_ids: { pokemontcg_io: match.external_id },
+                })
+              }
+              onSkip={() => setPrefill({})}
+            />
+          ) : (
+            <CardForm
+              onSubmit={(payload) => create.mutate(payload)}
+              onCancel={() => setAdding(false)}
+              submitting={create.isPending}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </>

@@ -227,17 +227,15 @@ def test_analytics_is_no_longer_a_later_phase(client: TestClient):
     assert response.json()["status"] == "insufficient_data", "empty collection, honestly reported"
 
 
-def test_refresh_is_real_and_refuses_until_a_source_is_enabled(client: TestClient):
-    """A fresh install makes no network call at all — that is the point.
+def test_refresh_refuses_when_every_source_is_off(client: TestClient):
+    """Turning the last one off must leave a clear message, not a silent no-op."""
+    for code in ("pokemontcg_io",):
+        client.patch(f"/api/data-sources/{code}", json={"enabled": False})
 
-    Enabling a source is the moment this application first reaches the internet,
-    so it is a decision the user takes rather than a default they discover.
-    """
     response = client.post("/api/market/refresh")
     assert response.status_code == 409
     message = response.json()["error"]["message"]
     assert "No market-data source is enabled" in message
-    assert "nothing here reaches the network until you do" in message
 
 
 def test_enabling_a_source_without_an_adapter_is_refused(client: TestClient):
@@ -247,13 +245,20 @@ def test_enabling_a_source_without_an_adapter_is_refused(client: TestClient):
     assert "has no adapter" in response.json()["error"]["message"]
 
 
-def test_the_free_catalogue_source_ships_ready_to_enable(client: TestClient):
-    """No signup, no approval, no key — the one a user can actually try."""
+def test_the_free_catalogue_source_ships_switched_on(client: TestClient):
+    """No signup, no approval, no key — so nothing is gained by making them find a switch."""
     sources = {row["code"]: row for row in client.get("/api/data-sources").json()}
     row = sources["pokemontcg_io"]
     assert row["has_adapter"] is True
-    assert row["enabled"] is False, "off until asked for"
+    assert row["enabled"] is True, "the one source that works with no setup is on"
 
-    enabled = client.patch("/api/data-sources/pokemontcg_io", json={"enabled": True})
-    assert enabled.status_code == 200
-    assert enabled.json()["enabled"] is True
+    off = client.patch("/api/data-sources/pokemontcg_io", json={"enabled": False})
+    assert off.status_code == 200
+    assert off.json()["enabled"] is False, "and one click turns it off"
+
+
+def test_sources_needing_a_key_stay_off(client: TestClient):
+    """A source that cannot work without setup must not claim to be running."""
+    sources = {row["code"]: row for row in client.get("/api/data-sources").json()}
+    for code in ("pokeprice", "pricecharting", "ebay", "cardmarket", "tcgplayer"):
+        assert sources[code]["enabled"] is False, code

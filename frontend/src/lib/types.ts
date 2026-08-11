@@ -110,6 +110,8 @@ export interface CardWrite {
   decision_override_reason?: string | null
   review_after?: string | null
   notes?: string | null
+  /** A provider's own id for this card, so price syncs can find it directly. */
+  external_ids?: Record<string, string> | null
 }
 
 export interface CardSet {

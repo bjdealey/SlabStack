@@ -384,10 +384,11 @@ DATA_SOURCES: tuple[dict, ...] = (
         "provider_class": "app.services.market_data.pokemontcg.PokemonTcgIoProvider",
         "base_url": "https://api.pokemontcg.io/v2",
         "api_key_env_var": "SLABSTACK_POKEMONTCG_API_KEY",
-        # Off until the user turns it on. Enabling a source is the moment this
-        # application first talks to the internet, and that should be a
-        # decision rather than a default.
-        "enabled": False,
+        # On by default, because it is the only source that can work with no
+        # setup at all: no key, no account, no approval. A switch the user has
+        # to find before anything works is a worse default than an outbound
+        # request they can turn off — and it is off in one click, in Settings.
+        "enabled": True,
         "priority": 80,
         "rate_limit_per_minute": 20,
         "config": {
@@ -673,7 +674,20 @@ def seed_all(db: Session, *, force: bool = False) -> dict[str, int]:
         counts["selling_profiles"] += 1
 
     for source in DATA_SOURCES:
-        if _get_by(db, DataSource, code=source["code"]) is not None:
+        existing = _get_by(db, DataSource, code=source["code"])
+        if existing is not None:
+            # A database created before a source gained its adapter still has
+            # the old `enabled: False`. Adopt the new default — but only where
+            # the source has never run, so a deliberate disable is never undone.
+            if (
+                source.get("enabled")
+                and not existing.enabled
+                and existing.last_sync_at is None
+                and existing.last_sync_status is None
+            ):
+                existing.enabled = True
+                existing.provider_class = source.get("provider_class")
+                existing.config = source.get("config")
             continue
         db.add(DataSource(**source))
         counts["data_sources"] += 1
