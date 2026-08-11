@@ -21,9 +21,6 @@ on:
   push:
     branches:
       - main
-      # Lets the demo track this branch before it is merged. Safe to drop
-      # afterwards.
-      - claude/pokemon-grading-roi-platform-r26ex1
     paths:
       - 'frontend/**'
       - '.github/workflows/pages.yml'
