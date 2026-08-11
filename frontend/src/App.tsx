@@ -4,7 +4,8 @@ import { Dashboard } from '@/pages/Dashboard'
 import { Collection } from '@/pages/Collection'
 import { CardDetail } from '@/pages/CardDetail'
 import { Settings } from '@/pages/Settings'
-import { AnalyticsPage, SubmissionsPage } from '@/pages/PhasePlaceholder'
+import { AnalyticsPage } from '@/pages/PhasePlaceholder'
+import { Submissions } from '@/pages/Submissions'
 
 export default function App() {
   return (
@@ -13,7 +14,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/collection" element={<Collection />} />
         <Route path="/cards/:cardId" element={<CardDetail />} />
-        <Route path="/submissions" element={<SubmissionsPage />} />
+        <Route path="/submissions" element={<Submissions />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

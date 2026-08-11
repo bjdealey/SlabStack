@@ -151,9 +151,16 @@ export function GradingRoutes({
           <div className="space-y-4">
             {Object.entries(byCompany).map(([code, options]) => (
               <div key={code}>
-                <p className="mb-1.5 text-xs font-medium text-ink-muted">
-                  {options[0].company_name}
-                </p>
+                {/* Each grader declares against its own slabs, so the same card
+                    can be worth £987 to CGC and £240 to a grader whose slabs
+                    have never sold. That number drives the ceilings below it,
+                    so it belongs beside them rather than only in the headline. */}
+                <div className="mb-1.5 flex items-baseline justify-between gap-3">
+                  <p className="text-xs font-medium text-ink-muted">{options[0].company_name}</p>
+                  <p className="tabular text-[0.7rem] text-ink-faint">
+                    declares at {formatMoney(options[0].declared_value, currency)}
+                  </p>
+                </div>
                 <div className="space-y-1.5">
                   {options.map((option, index) => (
                     <OptionRow

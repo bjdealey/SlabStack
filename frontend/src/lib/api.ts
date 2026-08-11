@@ -24,8 +24,11 @@ import type {
   Page,
   SaleWrite,
   SellingProfile,
+  OptimiserPlan,
   SettingsResponse,
   SnapshotSeries,
+  Submission,
+  SubmissionWrite,
 } from './types'
 
 const BASE = '/api'
@@ -197,6 +200,41 @@ export const api = {
   collectionDecisions: (batchSize = 1) =>
     request<CollectionDecisions>(`/collection/decisions${query({ batch_size: batchSize })}`),
 
+  // --- Submissions ---------------------------------------------------------
+  listSubmissions: () => request<Submission[]>('/submissions'),
+  getSubmission: (id: string) => request<Submission>(`/submissions/${id}`),
+  createSubmission: (payload: SubmissionWrite & { company_id: string; card_ids?: string[] }) =>
+    request<Submission>('/submissions', { method: 'POST', body: JSON.stringify(payload) }),
+  updateSubmission: (id: string, payload: SubmissionWrite) =>
+    request<Submission>(`/submissions/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteSubmission: (id: string) =>
+    request<void>(`/submissions/${id}`, { method: 'DELETE' }),
+  addSubmissionCards: (id: string, cardIds: string[], tierId?: string | null) =>
+    request<Submission>(`/submissions/${id}/cards`, {
+      method: 'POST',
+      body: JSON.stringify({ card_ids: cardIds, tier_id: tierId ?? null }),
+    }),
+  updateSubmissionCard: (
+    id: string,
+    lineId: string,
+    payload: {
+      tier_id?: string | null
+      declared_value?: number | null
+      actual_grade?: number | null
+      cert_number?: string | null
+      status?: string | null
+      notes?: string | null
+    },
+  ) =>
+    request<Submission>(`/submissions/${id}/cards/${lineId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  removeSubmissionCard: (id: string, lineId: string) =>
+    request<Submission>(`/submissions/${id}/cards/${lineId}`, { method: 'DELETE' }),
+  optimiseSubmissions: (limit?: number) =>
+    request<OptimiserPlan>(`/submissions/optimise${query({ limit })}`, { method: 'POST' }),
+
   // --- Reference data ------------------------------------------------------
   listSets: (q?: string) => request<CardSet[]>(`/sets${query({ q })}`),
   listVariants: () => request<CardVariant[]>('/variants'),
@@ -280,6 +318,9 @@ export const keys = {
   market: (id: string) => ['market', id] as const,
   sales: (id: string) => ['sales', id] as const,
   marketHistory: (id: string) => ['market-history', id] as const,
+  submissions: ['submissions'] as const,
+  submission: (id: string) => ['submission', id] as const,
+  optimiserPlan: (limit?: number) => ['optimiser-plan', limit ?? null] as const,
   summary: ['summary'] as const,
   collectionDecisions: (batchSize = 1) => ['collection-decisions', batchSize] as const,
   facets: ['facets'] as const,
