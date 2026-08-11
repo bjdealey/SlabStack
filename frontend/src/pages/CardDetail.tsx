@@ -10,6 +10,7 @@ import { CardForm } from '@/components/CardForm'
 import { ConditionForm } from '@/components/ConditionForm'
 import { ImageUploader } from '@/components/ImageUploader'
 import { ExplanationList } from '@/components/ExplanationList'
+import { GradeProbabilities } from '@/components/GradeProbabilities'
 import { DecisionBadge, StatusBadge } from '@/components/DecisionBadge'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -294,13 +295,24 @@ export function CardDetail() {
                       ))}
                     </div>
                   ) : null}
-
-                  <BlockNotice
-                    block={evaluated.grade_prediction}
-                    title="Grade probabilities"
-                  />
                 </PanelBody>
               </Panel>
+
+              {evaluated.grade_prediction.status === 'not_assessed' ? (
+                <Panel>
+                  <PanelHeader>
+                    <div>
+                      <PanelTitle>Grade probabilities</PanelTitle>
+                      <PanelDescription>{evaluated.grade_prediction.reason}</PanelDescription>
+                    </div>
+                    <Button size="sm" onClick={() => setAssessing(true)}>
+                      <ClipboardCheck /> Assess
+                    </Button>
+                  </PanelHeader>
+                </Panel>
+              ) : (
+                <GradeProbabilities block={evaluated.grade_prediction} />
+              )}
 
               <div className="grid gap-6 lg:grid-cols-2">
                 <Panel>

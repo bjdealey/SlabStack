@@ -3,11 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError, keys } from '@/lib/api'
-import type { GradingTier, SettingDefinition } from '@/lib/types'
+import type { GradeRule, GradingCompany, GradingTier, SettingDefinition } from '@/lib/types'
 import { PageHeader } from '@/components/AppShell'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Field, Input, Select } from '@/components/ui/field'
+import { Field, Input, Label, Select } from '@/components/ui/field'
 import { Panel, PanelBody, PanelDescription, PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ErrorState, LoadingPanel } from '@/components/ui/states'
@@ -18,6 +18,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   thresholds: 'Profit thresholds',
   risk: 'Risk',
   submission: 'Submission',
+  grade_model: 'Grade model',
   market: 'Market analysis',
 }
 
@@ -33,6 +34,7 @@ export function Settings() {
           <TabsList>
             <TabsTrigger value="economics">Economics</TabsTrigger>
             <TabsTrigger value="grading">Grading companies</TabsTrigger>
+            <TabsTrigger value="rules">Grade rules</TabsTrigger>
             <TabsTrigger value="selling">Selling costs</TabsTrigger>
             <TabsTrigger value="sources">Data sources</TabsTrigger>
           </TabsList>
@@ -42,6 +44,9 @@ export function Settings() {
           </TabsContent>
           <TabsContent value="grading" className="mt-5">
             <GradingSettings />
+          </TabsContent>
+          <TabsContent value="rules" className="mt-5">
+            <GradeRuleSettings />
           </TabsContent>
           <TabsContent value="selling" className="mt-5">
             <SellingSettings />
@@ -247,6 +252,7 @@ function GradingSettings() {
                 ) : null}
               </PanelDescription>
             </div>
+            <StrictnessInput company={company} />
           </PanelHeader>
           <PanelBody className="overflow-x-auto">
             {company.tiers.length === 0 ? (
@@ -307,6 +313,164 @@ function GradingSettings() {
           </PanelBody>
         </Panel>
       ))}
+    </div>
+  )
+}
+
+/**
+ * Ships at 0.0 for every company: SlabStack makes no claim about who grades
+ * harder. This is where the user records what they have actually seen come back.
+ */
+function StrictnessInput({ company }: { company: GradingCompany }) {
+  const queryClient = useQueryClient()
+  const save = useMutation({
+    mutationFn: (strictness: number) =>
+      api.updateCompany(company.id, { code: company.code, name: company.name, strictness }),
+    onSuccess: () => {
+      toast.success(`${company.code} strictness updated`)
+      queryClient.invalidateQueries({ queryKey: keys.companies })
+      queryClient.invalidateQueries({ queryKey: ['evaluation'] })
+    },
+    onError: (error: unknown) =>
+      toast.error(error instanceof ApiError ? error.message : 'Could not update strictness'),
+  })
+
+  return (
+    <div className="shrink-0 text-right">
+      <Label className="block">Grades harder / softer</Label>
+      <Input
+        type="number"
+        step="0.1"
+        min={-3}
+        max={3}
+        defaultValue={company.strictness}
+        onBlur={(event) => {
+          const value = Number(event.target.value)
+          if (value !== company.strictness) save.mutate(value)
+        }}
+        className="tabular mt-1 h-8 w-24 text-right"
+      />
+      <p className="mt-1 text-[0.7rem] text-ink-faint">grade points, 0 = neutral</p>
+    </div>
+  )
+}
+
+function GradeRuleSettings() {
+  const queryClient = useQueryClient()
+  const rules = useQuery({ queryKey: keys.gradeRules, queryFn: api.listGradeRules })
+
+  const save = useMutation({
+    mutationFn: ({ rule, changes }: { rule: GradeRule; changes: Record<string, unknown> }) =>
+      api.updateGradeRule(rule.id, {
+        code: rule.code,
+        label: rule.label,
+        field: rule.field,
+        face: rule.face,
+        min_severity: rule.min_severity,
+        max_grade: rule.max_grade,
+        probability_multiplier: rule.probability_multiplier,
+        penalty_from_grade: rule.penalty_from_grade,
+        active: rule.active,
+        ...changes,
+      }),
+    onSuccess: () => {
+      toast.success('Rule updated')
+      queryClient.invalidateQueries({ queryKey: keys.gradeRules })
+      queryClient.invalidateQueries({ queryKey: ['evaluation'] })
+    },
+    onError: (error: unknown) =>
+      toast.error(error instanceof ApiError ? error.message : 'Could not update the rule'),
+  })
+
+  if (rules.isLoading) return <LoadingPanel />
+  if (rules.isError) return <ErrorState error={rules.error} />
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3 rounded-lg border border-line bg-surface-raised px-4 py-3 text-xs text-ink-muted">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-caution" />
+        <p>
+          These are SlabStack's estimates of how defects affect a grade — not PSA's, CGC's or ACE's
+          published standards, and no grader endorses them. A <strong>cap</strong> is the highest
+          grade the defect allows; a <strong>multiplier</strong> makes high grades less likely
+          without ruling them out. Disagree with one? Change it, and every card re-evaluates.
+        </p>
+      </div>
+
+      <Panel className="overflow-x-auto">
+        <table className="w-full min-w-3xl text-sm">
+          <thead className="border-b border-line text-left text-xs uppercase tracking-wider text-ink-faint">
+            <tr>
+              <th className="px-4 py-3 font-medium">Rule</th>
+              <th className="px-4 py-3 font-medium">Triggers on</th>
+              <th className="px-4 py-3 font-medium">From severity</th>
+              <th className="px-4 py-3 text-right font-medium">Caps at</th>
+              <th className="px-4 py-3 text-right font-medium">Multiplier</th>
+              <th className="px-4 py-3 text-right font-medium">Active</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rules.data!.map((rule) => (
+              <tr key={rule.id} className="border-b border-line/60 last:border-0">
+                <td className="px-4 py-2.5">
+                  <p className="text-ink">{rule.label}</p>
+                  <p className="font-mono text-[0.7rem] text-ink-faint">{rule.code}</p>
+                </td>
+                <td className="px-4 py-2.5 text-ink-muted">
+                  {rule.field.replace(/_/g, ' ')}
+                  {rule.face && rule.face !== 'any' ? ` (${rule.face})` : ''}
+                </td>
+                <td className="px-4 py-2.5">
+                  <Badge
+                    tone={
+                      rule.min_severity === 'severe'
+                        ? 'negative'
+                        : rule.min_severity === 'moderate'
+                          ? 'caution'
+                          : 'outline'
+                    }
+                  >
+                    {rule.min_severity}
+                  </Badge>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  {rule.max_grade === null ? (
+                    <span className="text-ink-faint">—</span>
+                  ) : (
+                    <Input
+                      type="number"
+                      step="0.5"
+                      min={0}
+                      max={10}
+                      defaultValue={rule.max_grade}
+                      onBlur={(event) => {
+                        const max_grade = Number(event.target.value)
+                        if (max_grade !== rule.max_grade) save.mutate({ rule, changes: { max_grade } })
+                      }}
+                      className="tabular ml-auto h-8 w-20 text-right"
+                    />
+                  )}
+                </td>
+                <td className="tabular px-4 py-2.5 text-right text-ink-muted">
+                  {rule.probability_multiplier === null
+                    ? '—'
+                    : `${(rule.probability_multiplier * 100).toFixed(0)}% from ${rule.penalty_from_grade}`}
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <input
+                    type="checkbox"
+                    checked={rule.active}
+                    onChange={(event) =>
+                      save.mutate({ rule, changes: { active: event.target.checked } })
+                    }
+                    className="size-4 accent-[var(--color-brand)]"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
     </div>
   )
 }

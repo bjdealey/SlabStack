@@ -305,8 +305,17 @@ def _normal_cdf(x: float, mean: float, sigma: float) -> float:
 def _discretise(centre: float, sigma: float, ladder: list[float]) -> dict[float, float]:
     """Integrate the estimate over each grade's bucket.
 
-    Mass beyond the ends folds into the end grades: a card estimated at 11 is a
+    The two ends are handled differently, and deliberately so.
+
+    The *top* grade absorbs everything above it: a card estimated at 11 is a
     top-grade card, not an impossible one.
+
+    The *bottom* grade does not absorb everything below it. It is tempting to
+    mirror the top, but a card capped at 3 with a wide spread would then have
+    grade 1 swallow the whole lower tail and come out as the single most likely
+    outcome — the model would announce "probably a 1" about a card it actually
+    believes is a 3. Mass below the scale is discarded and the rest renormalised
+    instead.
     """
     ascending = sorted(ladder)
     step = (ascending[1] - ascending[0]) if len(ascending) > 1 else 1.0
@@ -314,9 +323,9 @@ def _discretise(centre: float, sigma: float, ladder: list[float]) -> dict[float,
 
     weights: dict[float, float] = {}
     for index, grade in enumerate(ascending):
-        low = -math.inf if index == 0 else grade - half
+        low = grade - half
         high = math.inf if index == len(ascending) - 1 else grade + half
-        lower = 0.0 if low == -math.inf else _normal_cdf(low, centre, sigma)
+        lower = _normal_cdf(low, centre, sigma)
         upper = 1.0 if high == math.inf else _normal_cdf(high, centre, sigma)
         weights[grade] = max(0.0, upper - lower)
     return weights

@@ -201,8 +201,9 @@ the next image on that side.
 | GET    | `/api/cards/{id}/condition`              | ✅     | Current assessment. `404` if none. |
 | PUT    | `/api/cards/{id}/condition`              | ✅     | Record an assessment; supersedes the previous one. |
 | GET    | `/api/cards/{id}/condition/history`      | ✅     | Every assessment, newest first.    |
-| GET    | `/api/cards/{id}/grade-predictions`      | ✅     | Stored predictions.                |
-| POST   | `/api/cards/{id}/grade-prediction`       | ⏳ P2  | Run the probability model.         |
+| GET    | `/api/cards/{id}/grade-predictions`      | ✅     | Stored predictions. `?current_only=true` for the live set. |
+| POST   | `/api/cards/{id}/grade-prediction`       | ✅     | Run the probability model and persist the run. |
+| PUT    | `/api/cards/{id}/grade-prediction/override` | ✅  | Set the probabilities yourself.    |
 
 The wire format is nested even though the table is flat, because that is how a card is inspected:
 
@@ -251,6 +252,20 @@ then the combined score is the weaker face. Sub-scores are arithmetic, not gradi
 `PUT` never edits in place. A card re-examined under better light is a new opinion, and the history
 is what Phase 8 calibrates against.
 
+### Grade predictions
+
+`POST /api/cards/{id}/grade-prediction` returns an array: one company-agnostic `physical`
+prediction — what the card is — plus one `market` prediction per grading company in scope. It
+supersedes the previous run but leaves any prediction you overrode alone. `400 no_assessment` if
+the card has not been assessed.
+
+`PUT …/grade-prediction/override` takes `{company_id?, probabilities, confidence, notes?}`.
+Probabilities are keyed by grade string and must sum to 1 (±0.02). The model's own output is
+superseded rather than deleted, so its accuracy can still be scored against the eventual grade.
+
+The evaluation block recomputes predictions live rather than reading stored ones, so they can never
+lag a reassessment. `POST` exists for history and Phase 8 calibration.
+
 ---
 
 ## `GET /api/cards/{id}/evaluation` — the decision engine
@@ -295,12 +310,25 @@ for the rest. No block ever invents a number to look complete.
     "notable_defects": ["Front creases: moderate"]
   },
 
-  "grade_prediction": {             // ⏳ Phase 2
-    "status": "not_implemented", "phase": 2, "reason": "…",
-    "company_code": null, "kind": null, "source": null,
-    "probabilities": [],            // [{ "grade": 10, "label": "PSA 10", "probability": 0.55 }]
-    "likely_grade": null, "grade_min": null, "grade_max": null,
-    "max_grade_cap": null, "confidence": "none", "caps_applied": []
+  "grade_prediction": {             // ✅ Phase 2
+    "status": "ok",                 // not_assessed until a condition assessment exists
+    "reason": null, "phase": null,
+    // Headline fields describe the first company in scope.
+    "company_code": "PSA", "kind": "market", "source": "rules_engine",
+    "probabilities": [{ "grade": 10, "label": "PSA 10", "probability": 0.55 }],
+    "likely_grade": 10, "grade_min": 9, "grade_max": 10,
+    "max_grade_cap": null, "confidence": "high", "caps_applied": [],
+    // The card itself, ignoring who is grading it (spec section 8).
+    "physical": { "company_code": "physical", "likely_grade": 10, "probabilities": [] },
+    // Every grader, because they do not grade alike and must not be merged.
+    "by_company": [{
+      "company_id": "…", "company_code": "PSA", "company_name": "…",
+      "probabilities": [], "likely_grade": 10, "grade_min": 9, "grade_max": 10,
+      "max_grade_cap": null, "confidence": "high", "caps_applied": [],
+      "is_user_override": false
+    }],
+    "model_version": "rules-1.0",
+    "base_grade": 9.6                // sub-score blend, before any rule applied
   },
 
   "market": {                       // ⏳ Phase 3
@@ -472,6 +500,19 @@ price is a `PATCH` the engine picks up on the next evaluation.
 | POST   | `/api/grading/companies/{id}/memberships`       | ✅     |                             |
 | PATCH  | `/api/grading/memberships/{id}`                 | ✅     |                             |
 | DELETE | `/api/grading/memberships/{id}`                 | ✅     |                             |
+| GET    | `/api/grading/rules`                            | ✅     | Grade model caps and multipliers. |
+| POST   | `/api/grading/rules`                            | ✅     |                             |
+| PATCH  | `/api/grading/rules/{id}`                       | ✅     |                             |
+| DELETE | `/api/grading/rules/{id}`                       | ✅     | `409` for built-ins; deactivate instead. |
+
+Company fields include `strictness`: grade points that company is assumed to award above (+) or
+below (-) the model's baseline. It ships at `0.0` for every company — SlabStack makes no claim
+about who grades harder, and the user sets it from their own returned submissions.
+
+Rule fields: `field` (an assessment defect field, or a group such as `corner_any`), `face`
+(`front` | `back` | `any`), `min_severity`, and an effect — `max_grade` (a hard ceiling) and/or
+`probability_multiplier` with `penalty_from_grade` (scales the mass at and above that grade). A
+rule must have at least one effect.
 
 Tier fields: `tier_code`, `tier_name`, `price`, `currency`, `minimum_cards`, `maximum_cards`,
 `min_declared_value`, `max_declared_value`, `turnaround_days`, `membership_required`,
@@ -528,6 +569,9 @@ Keys by category:
   `hold_recheck_days`
 - **submission** — `cost_allocation_method`, `default_submission_shipping_out`,
   `default_submission_shipping_return`, `default_submission_insurance_pct`
+- **grade_model** — `grade_model_weights`, `grade_model_worst_weight`, `grade_model_base_sigma`,
+  `grade_model_unknown_sigma`, `grade_model_disagreement_factor`, `grade_model_max_sigma`,
+  `grade_model_min_probability`
 - **market** — `market_window_days`, `recency_half_life_days`, `outlier_iqr_multiplier`,
   `min_sales_high_confidence`, `min_sales_medium_confidence`
 

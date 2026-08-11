@@ -161,6 +161,27 @@ class TestRules:
         assert result.likely_grade <= 3
         assert all(float(grade) <= 3 for grade in result.probabilities)
 
+    def test_a_capped_card_peaks_at_the_cap_not_the_bottom_of_the_scale(
+        self, company, rules, params
+    ):
+        """Regression: the lowest grade used to absorb the whole lower tail.
+
+        A part-assessed card with a severe crease has a wide spread and a low
+        centre, and grade 1 would swallow everything below it and come out the
+        single most likely outcome — the model announcing "probably a 1" about a
+        card it actually believed was a 3.
+        """
+        row = assessment(centering=False, front_creases=Severity.SEVERE.value)
+        for field in DEFECTS:
+            setattr(row, f"back_{field}", Severity.UNKNOWN.value)
+        recompute_scores(row)
+
+        result = predict(row, company, rules, params)
+        assert result.sigma > 1.0, "this case only bites when the spread is wide"
+        assert result.max_grade_cap == 3.0
+        assert result.likely_grade == 3
+        assert result.probabilities["3"] > result.probabilities.get("1", 0)
+
     def test_the_strictest_cap_wins(self, company, rules, params):
         result = predict(
             assessment(
