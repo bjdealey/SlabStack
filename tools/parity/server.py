@@ -13,6 +13,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent / "backend"))
 
+from app.money import allocate  # noqa: E402
 from app.services import decision  # noqa: E402
 
 
@@ -90,6 +91,25 @@ def run(case: dict) -> dict:
     }
 
 
+def run_allocation(case: dict) -> dict:
+    """The split itself, where a penny is easiest to lose."""
+    parts = allocate(case["totalMinor"], case["weights"])
+    return {
+        "name": case["name"],
+        "parts": parts,
+        "sum": sum(parts),
+        "exact": sum(parts) == case["totalMinor"],
+    }
+
+
 if __name__ == "__main__":
-    cases = json.loads((HERE / "cases.json").read_text())["cases"]
-    print(json.dumps([run(case) for case in cases], indent=2))
+    data = json.loads((HERE / "cases.json").read_text())
+    print(
+        json.dumps(
+            {
+                "decisions": [run(case) for case in data["cases"]],
+                "allocations": [run_allocation(case) for case in data["allocations"]],
+            },
+            indent=2,
+        )
+    )

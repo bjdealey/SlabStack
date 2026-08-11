@@ -46,24 +46,34 @@ def main() -> int:
     server = json.loads((here / ".server.json").read_text())
     demo = json.loads((here / ".demo.json").read_text())
 
-    if len(server) != len(demo):
-        print(f"✗ {len(server)} server cases against {len(demo)} demo cases")
-        return 1
-
     problems: list[tuple[str, object, object]] = []
-    for left, right in zip(server, demo):
-        compare(left["name"], left, right, problems)
+    total = 0
 
-    for case in server:
+    for section in ("decisions", "allocations"):
+        left_rows = server.get(section, [])
+        right_rows = demo.get(section, [])
+        if len(left_rows) != len(right_rows):
+            print(
+                f"✗ {section}: {len(left_rows)} server cases against {len(right_rows)} demo cases"
+            )
+            return 1
+        total += len(left_rows)
+        for left, right in zip(left_rows, right_rows):
+            compare(f"{section}/{left['name']}", left, right, problems)
+
+    for case in server.get("decisions", []):
         route = case["route"]
         print(
             f"  {case['name']:<44} {case['decision']:<22} "
             f"score={route['opportunity_score']} coverage={route['coverage']}"
         )
+    for case in server.get("allocations", []):
+        mark = "exact" if case["exact"] else "LOST PENNIES"
+        print(f"  {case['name']:<44} {mark:<22} sum={case['sum']}")
 
     print()
     if not problems:
-        print(f"✓ The two engines agree on every field across {len(server)} case(s).")
+        print(f"✓ The two engines agree on every field across {total} case(s).")
         return 0
 
     print(f"✗ {len(problems)} difference(s) between the server and the demo:\n")

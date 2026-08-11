@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DecisionInputs } from '@/lib/demo/decision'
 import { decide, evaluateRoute, thresholdsFrom } from '@/lib/demo/decision'
+import { allocateWeighted } from '@/lib/demo/submissions'
 
 interface ParityCase {
   name: string
@@ -23,9 +24,16 @@ interface ParityCase {
   settings: Record<string, unknown>
 }
 
+interface AllocationCase {
+  name: string
+  totalMinor: number
+  weights: number[]
+}
+
 const here = dirname(fileURLToPath(import.meta.url))
-const { cases } = JSON.parse(readFileSync(join(here, 'cases.json'), 'utf8')) as {
+const { cases, allocations } = JSON.parse(readFileSync(join(here, 'cases.json'), 'utf8')) as {
   cases: ParityCase[]
+  allocations: AllocationCase[]
 }
 
 const output = cases.map((testCase) => {
@@ -85,4 +93,13 @@ const output = cases.map((testCase) => {
   }
 })
 
-console.log(JSON.stringify(output, null, 2))
+/** The split itself, where a penny is easiest to lose. */
+const allocationOutput = allocations.map((testCase) => {
+  const parts = allocateWeighted(testCase.totalMinor, testCase.weights)
+  const total = parts.reduce((sum, part) => sum + part, 0)
+  return { name: testCase.name, parts, sum: total, exact: total === testCase.totalMinor }
+})
+
+console.log(
+  JSON.stringify({ decisions: output, allocations: allocationOutput }, null, 2),
+)

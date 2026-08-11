@@ -26,6 +26,7 @@ from app.api.routes import (
     images,
     market,
     phases,
+    submissions,
 )
 from app.api.routes import (
     settings as settings_routes,
@@ -143,6 +144,7 @@ api.include_router(condition.router)
 api.include_router(groups.router)
 api.include_router(grading.router)
 api.include_router(market.router)
+api.include_router(submissions.router)
 api.include_router(phases.router)
 app.include_router(api)
 

@@ -359,16 +359,56 @@ def _build_grade_prediction_block(
     )
 
 
-def _headline_probabilities(block: GradePredictionBlock) -> tuple[dict[float, float] | None, str | None]:
-    """The distribution to value a declared value against, and whose ladder it is."""
-    if not block.by_company:
-        return None, None
-    company = block.by_company[0]
-    if not company.probabilities:
-        return None, None
-    return (
-        {item.grade: item.probability for item in company.probabilities},
-        company.company_code,
+def _headline_company(
+    companies: list[GradingCompany], block: GradePredictionBlock
+) -> str | None:
+    """Whose ladder the headline declared value is quoted against.
+
+    The first grader actually in scope for costing, rather than the first with a
+    grade prediction — those can differ, and the headline has to agree with the
+    tier rows it sits above.
+    """
+    if companies:
+        return companies[0].code
+    return block.by_company[0].company_code if block.by_company else None
+
+
+def _probabilities_for_company(
+    block: GradePredictionBlock, company_code: str | None
+) -> dict[float, float] | None:
+    """That company's own grade distribution, or ``None`` if it has none."""
+    if company_code is None:
+        return None
+    for item in block.by_company:
+        if item.company_code == company_code and item.probabilities:
+            return {row.grade: row.probability for row in item.probabilities}
+    return None
+
+
+def _declared_for_company(
+    card: Card,
+    summary: market_service.MarketSummary,
+    block: GradePredictionBlock,
+    company_code: str | None,
+) -> economics.DeclaredValue:
+    """What this card would be declared at when sent to one particular grader.
+
+    Weighted by that grader's own ladder and priced from its own slabs, because
+    a declared value is a statement about the slab you are going to own. Your
+    own figure overrides it everywhere, as it does throughout.
+    """
+    if card.user_declared_value_minor is not None:
+        return economics.DeclaredValue(
+            value_minor=card.user_declared_value_minor,
+            source=DeclaredValueSource.USER.value,
+            confidence=Confidence.HIGH.value,
+            basis="Your own figure. The engine's suggestion is kept alongside it, not replaced.",
+        )
+    return economics.suggest_declared_value(
+        card,
+        prices=summary.prices,
+        probabilities=_probabilities_for_company(block, company_code),
+        company_code=company_code,
     )
 
 
@@ -452,17 +492,12 @@ def _build_grading_options_block(
     if wanted:
         companies = [company for company in companies if company.code in wanted] or companies
 
-    probabilities, company_code = _headline_probabilities(grade_block)
-    declared = economics.suggest_declared_value(
-        card, prices=summary.prices, probabilities=probabilities, company_code=company_code
-    )
-    if card.user_declared_value_minor is not None:
-        declared = economics.DeclaredValue(
-            value_minor=card.user_declared_value_minor,
-            source=DeclaredValueSource.USER.value,
-            confidence=Confidence.HIGH.value,
-            basis="Your own figure. The engine's suggestion is kept alongside it, not replaced.",
-        )
+    # The headline figure the panel shows. Declared values now differ per
+    # grader — the same card is worth more in a CGC slab than an unpriced ACE
+    # one — so the headline is quoted against a named company rather than
+    # floating free and contradicting the rows beneath it.
+    headline_company = _headline_company(companies, grade_block)
+    declared = _declared_for_company(card, summary, grade_block, headline_company)
 
     assumptions = economics.SubmissionAssumptions.from_settings(
         settings_values, batch_size=batch_size or 1
@@ -471,9 +506,16 @@ def _build_grading_options_block(
 
     options: list[GradingOption] = []
     for company in companies:
+        # Valued against *this* company's ladder and prices, not the headline
+        # grader's. A CGC card whose CGC slabs are worth £987 is over CGC Bulk's
+        # £400 ceiling — costing it against PSA's ladder, where no PSA sales
+        # exist, drops it back to the raw value and lets an ineligible tier
+        # through. Same rule as the best-case panel: never pair one grader's
+        # numbers with another's fees.
+        company_declared = _declared_for_company(card, summary, grade_block, company.code)
         tiers = economics.eligible_tiers(
             company,
-            declared_value_minor=declared.value_minor,
+            declared_value_minor=company_declared.value_minor,
             batch_size=assumptions.batch_size,
             today=date.today(),
         )
@@ -484,7 +526,7 @@ def _build_grading_options_block(
                     company_code=company.code,
                     company_name=company.name,
                     currency=company.currency,
-                    declared_value=to_major(declared.value_minor),
+                    declared_value=to_major(company_declared.value_minor),
                     available=False,
                     blockers=[
                         f"No active tier configured for {company.code}. "
@@ -498,7 +540,7 @@ def _build_grading_options_block(
             costing = economics.cost_for_tier(
                 tier,
                 company,
-                declared_value_minor=declared.value_minor,
+                declared_value_minor=company_declared.value_minor,
                 assumptions=assumptions,
                 blockers=blockers,
             )
@@ -512,7 +554,7 @@ def _build_grading_options_block(
                     tier_id=tier.id,
                     tier_name=tier.tier_name,
                     currency=tier.currency,
-                    declared_value=to_major(declared.value_minor),
+                    declared_value=to_major(company_declared.value_minor),
                     base_fee=to_major(cost.base_fee_minor) if priced else None,
                     membership_discount=to_major(cost.membership_discount_minor) or None,
                     grading_fee=to_major(cost.grading_fee_minor) if priced else None,
@@ -590,6 +632,10 @@ def _build_grading_options_block(
             "drives tier eligibility — check it before submitting."
         )
 
+    basis = declared.basis
+    if headline_company and declared.source != DeclaredValueSource.USER.value:
+        basis = f"Valued against {headline_company}'s ladder. {basis or ''}".strip()
+
     return GradingOptionsBlock(
         status=status,
         phase=None if status == BlockStatus.OK.value else PHASE_ECONOMICS,
@@ -599,7 +645,7 @@ def _build_grading_options_block(
         declared_value=to_major(declared.value_minor),
         declared_value_source=declared.source,
         declared_value_confidence=declared.confidence,
-        declared_value_basis=declared.basis,
+        declared_value_basis=basis,
         declared_value_coverage=declared.coverage,
         assumed_batch_size=assumptions.batch_size,
         allocation_method=assumptions.allocation_method,

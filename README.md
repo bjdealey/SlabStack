@@ -12,7 +12,7 @@ no outbound network call in this build.
 
 ---
 
-## Status: Phases 1–4
+## Status: Phases 1–6
 
 | Delivered                                                                     |
 | ----------------------------------------------------------------------------- |
@@ -29,7 +29,9 @@ no outbound network call in this build.
 | Configuration-driven grading companies, tiers, memberships and selling profiles |
 | `evaluate_card` — the decision envelope the whole UI renders                  |
 | React dashboard, collection view, card detail page, market panel and settings |
-| 332 backend tests, contract guards, clean lint, verified end-to-end in a browser |
+| **Decision engine** — expected value per route, risk-adjusted, with the route that lost |
+| **Submission optimiser** — real batch costing, and a re-check that the plan still pays |
+| 444 backend tests, engine-parity checks, clean lint, verified end-to-end in a browser |
 
 Market data comes from sales you enter or import. Network provider adapters are **not** built:
 they need API credentials and each service's terms reviewed, so `POST /api/market/refresh` is the
@@ -168,6 +170,7 @@ FastAPI
   ├── grading companies / tiers / memberships (configuration)
   ├── selling profiles, settings              (economics)
   ├── evaluation  ← the decision engine
+  ├── submissions ← batch costing and the optimiser
   └── market data providers                   (Phase 3, behind an interface)
         │
      SQLite  ← the source of truth
@@ -220,6 +223,10 @@ it today keeps working as they land.
 and returns them ranked. It is a separate call from the dashboard summary on purpose: it costs
 about 20 ms a card, so the page paints first and the verdicts arrive after.
 
+`POST /api/submissions/optimise` goes one step further and packs those cards into parcels — then
+re-costs each one at the size its batch actually reached, because a card that clears your bar in a
+submission of twenty-five may not in a submission of six.
+
 ---
 
 ## Two rules this build takes seriously
@@ -263,6 +270,12 @@ see enough of the outcomes to say" — those need opposite actions.
 **The engine advises; you decide.** A decision you set yourself wins everywhere, including the
 collection totals, and the engine switches to explaining rather than deciding. Handing the card
 back is one click.
+
+**A plan is only worth what it costs to carry out.** Grading costs depend on the batch, so the
+submission optimiser re-costs every card at the size its batch actually came out at rather than
+the size it was routed against. Cards that stop paying are listed with the number that changed and
+excluded from every total — an optimiser that skipped that step would be proposing submissions it
+had never costed.
 
 ---
 

@@ -182,16 +182,49 @@ differently.
 
 ---
 
-## Phase 6 — Submission optimiser ← next
+## Phase 6 — Submission optimiser ✅
 
-**Build:** batch creation and drag-and-drop, whole-collection optimisation against tier minimums
-and value ceilings, membership break-even, shared-cost allocation across a real batch, and the
-"move card #184 from Economy to Bulk to save £2.20" suggestion. The tables and the allocation maths
-already exist.
+Building the parcel, in `app/services/submissions.py` and `app/services/optimiser.py`.
+
+- **Real batch costing.** Phase 4 costed a hypothetical card in a hypothetical batch; this costs
+  the parcel you built. Insurance comes from the real declared values, not one card's value
+  multiplied by the batch size.
+- **Value-weighted allocation**, which Phase 4 could only promise — it had no other cards to weight
+  against. Penny-exact either way, and it still falls back with a note when there is nothing to
+  weight by.
+- **Minimums are per tier, not per parcel.** Bulk pricing needs N cards *at bulk rates*; thirty
+  cards with three at Bulk is three bulk cards. Shipping is shared across the whole parcel
+  regardless of tier, which is what makes a mixed submission worth building.
+- **The optimiser** routes every ready card at a batch big enough for the bulk tiers to be visible,
+  packs by (company, tier), and then **re-costs every card at the size its batch actually came out
+  at**. Cards that stop paying are listed with the number that changed and excluded from every
+  total.
+- **Lifecycle** draft → planned → shipped → received → grading → returned, with actual grades and
+  cert numbers recorded per card. A shipped parcel's contents are frozen: what you sent is a
+  record, and Phase 8 compares predicted grades against it.
+- **Membership break-even** against the fees in the parcel in front of you.
+
+**Learned the hard way, twice.**
+
+`grade_if_batch_filled` was being accepted at re-verification. It is a fair answer while the batch
+is hypothetical; once the size is a known fact it means "not in the batch you have", and accepting
+it let the optimiser bless a plan on the strength of a submission that did not exist.
+
+A batch of nine routed to Bulk was labelled Bulk while quoting Economy's price, because Bulk needs
+twenty-five and was unavailable at that size. Batches now carry both tiers — the one they were
+routed to and the one they actually land on — and short batches report what filling them is worth
+rather than only asking for more cards.
+
+**And a Phase 4 bug this phase exposed.** The declared value was computed once against the
+*headline* grader and then applied to every company's tier eligibility. With no PSA sales stored,
+the PSA-weighted figure fell back to the raw value — so a card whose CGC slabs are worth £987 was
+declared at £240 and slipped under CGC Bulk's £400 ceiling. The engine was recommending a tier the
+card cannot legally use. Declared values are now computed per company, against that company's own
+ladder and its own slab prices, which is the rule the best-case panel already followed.
 
 ---
 
-## Phase 7 — Analytics
+## Phase 7 — Analytics ← next
 
 **Build:** ranked opportunities, the raw selling queue with suggested listing prices, price/volume/
 liquidity charts per card, submission ROI, and the one-click collection filters (grade now, grade

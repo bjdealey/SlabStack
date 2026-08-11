@@ -716,6 +716,172 @@ export interface CollectionDecisions {
   opportunities: Opportunity[]
 }
 
+/* --- Submissions --------------------------------------------------------- */
+
+export interface SubmissionCardLine {
+  submission_card_id: string
+  card_id: string
+  name: string
+  set_label: string | null
+  tier_id: string | null
+  tier_name: string | null
+  declared_value: number | null
+  declared_value_source: string
+  declared_value_confidence: Confidence | null
+  base_fee: number | null
+  membership_discount: number | null
+  grading_fee: number | null
+  per_card_fees: number | null
+  declared_value_fee: number | null
+  allocated_overhead: number | null
+  total_cost: number | null
+  /** What drove this card's share of the pot: 1 when equal, the declared value when weighted. */
+  allocation_weight: number
+  predicted_grade: number | null
+  actual_grade: number | null
+  status: string
+  sort_order: number
+  blockers: string[]
+}
+
+/** The cards on one tier, and whether that tier's own rules are satisfied. */
+export interface SubmissionTierGroup {
+  tier_id: string | null
+  tier_name: string | null
+  company_code: string
+  card_count: number
+  minimum_cards: number
+  maximum_cards: number | null
+  short_by: number
+  over_by: number
+  blockers: string[]
+}
+
+export interface Submission {
+  id: string
+  reference: string
+  name: string | null
+  status: string
+  currency: string
+  company_id: string | null
+  company_code: string | null
+  company_name: string | null
+  tier_id: string | null
+  card_count: number
+  declared_value_total: number | null
+  shipping_out: number | null
+  shipping_return: number | null
+  insurance: number | null
+  handling: number | null
+  other_fees: number | null
+  tier_additional_fees: number | null
+  shared_pot: number | null
+  grading_fees: number | null
+  per_card_fees: number | null
+  declared_value_fees: number | null
+  membership_discount: number | null
+  total_cost: number | null
+  /** An average, and null with no cards — not zero. */
+  cost_per_card: number | null
+  allocation_method: string
+  allocation_note: string | null
+  membership_code: string | null
+  submitted_at: string | null
+  received_at: string | null
+  returned_at: string | null
+  tracking_outbound: string | null
+  tracking_return: string | null
+  notes: string | null
+  tiers: SubmissionTierGroup[]
+  cards: SubmissionCardLine[]
+  blockers: string[]
+  warnings: string[]
+}
+
+export interface SubmissionWrite {
+  name?: string | null
+  company_id?: string | null
+  tier_id?: string | null
+  status?: string | null
+  cost_allocation_method?: string | null
+  shipping_out?: number | null
+  shipping_return?: number | null
+  handling?: number | null
+  other_fees?: number | null
+  submitted_at?: string | null
+  received_at?: string | null
+  returned_at?: string | null
+  tracking_outbound?: string | null
+  tracking_return?: string | null
+  notes?: string | null
+}
+
+export interface PlacedCard {
+  card_id: string
+  name: string
+  set_label: string | null
+  company_code: string | null
+  tier_id: string | null
+  tier_name: string | null
+  declared_value: number | null
+  decision_when_routed: Decision
+  decision_in_batch: Decision
+  expected_profit: number | null
+  grading_cost: number | null
+  opportunity_score: number | null
+  /** False when the card stopped paying once the real batch size was known. */
+  still_pays: boolean
+  reason: string | null
+  cheaper_tier_name: string | null
+  cheaper_tier_saving: number | null
+}
+
+export interface ProposedBatch {
+  company_id: string
+  company_code: string
+  tier_id: string | null
+  tier_name: string | null
+  /** Where the cards land at the current count — differs from tier_name while short. */
+  effective_tier_name: string | null
+  card_count: number
+  minimum_cards: number
+  maximum_cards: number | null
+  short_by: number
+  expected_profit: number | null
+  grading_cost: number | null
+  expected_profit_if_filled: number | null
+  viable: boolean
+  reason: string | null
+  cards: PlacedCard[]
+}
+
+export interface OptimiserPlan {
+  status: BlockStatus
+  reason: string | null
+  currency: string
+  analysable: number
+  worth_grading: number
+  placed: number
+  total_cards: number
+  truncated: boolean
+  /** The batch size cards were routed at, so bulk tiers were on the table. */
+  routed_at_batch_size: number
+  expected_profit: number | null
+  total_grading_cost: number | null
+  batches: ProposedBatch[]
+  unplaced: {
+    card_id: string
+    name: string
+    set_label: string | null
+    company_code: string | null
+    tier_name: string | null
+    expected_profit: number | null
+    reason: string
+  }[]
+  stopped_paying: PlacedCard[]
+  notes: string[]
+}
+
 export interface Facets {
   sets: string[]
   languages: string[]

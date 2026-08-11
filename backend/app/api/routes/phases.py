@@ -43,25 +43,6 @@ def refresh_market() -> None:
     )
 
 
-@router.get("/submissions", summary="Grading submissions (Phase 6)")
-def list_submissions() -> None:
-    _stub(
-        "The submission planner is not built yet. Grading companies, tiers, minimums and "
-        "membership discounts are already modelled, so batching can be built directly on top.",
-        phase=6,
-        planned_in="Phase 6 — submission optimiser: batching, minimums, shared cost allocation.",
-    )
-
-
-@router.post("/submissions/optimise", summary="Optimise submissions across the collection (Phase 6)")
-def optimise_submissions() -> None:
-    _stub(
-        "The submission optimiser is not built yet.",
-        phase=6,
-        planned_in="Phase 6 — whole-collection batch optimisation against tier minimums.",
-    )
-
-
 @router.get("/analytics/opportunities", summary="Best grading opportunities (Phase 7)")
 def opportunities() -> None:
     _stub(

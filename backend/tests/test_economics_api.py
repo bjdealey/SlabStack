@@ -210,6 +210,61 @@ def test_the_best_case_never_mixes_one_graders_fee_with_anothers_slab_price(
     assert best_outcome["upside_vs_raw"] > by_code["ACE"]["upside_vs_raw"]
 
 
+def test_each_grader_declares_against_its_own_slabs(client: TestClient, card: dict):
+    """A declared value is a statement about the slab you will own.
+
+    Weighting every company's tiers against the *headline* grader's ladder let a
+    card through a ceiling it exceeded: with no PSA sales stored, the PSA-weighted
+    figure fell back to the raw value, and a CGC card whose CGC slabs are worth
+    far more slipped under a CGC tier's cap.
+    """
+    for index in range(20):
+        add_sale(client, card["id"], days=index * 4, price=200)
+    for grade, price in ((10, 900), (9.5, 610), (9, 400)):
+        for index in range(6):
+            add_sale(
+                client, card["id"], days=index * 9, price=price,
+                company_id=company_id(client, "CGC"), grade=grade,
+            )
+    assess(client, card["id"])
+
+    options = options_block(client, card["id"], batch=25)["options"]
+    cgc = [row for row in options if row["company_code"] == "CGC"]
+    psa = [row for row in options if row["company_code"] == "PSA"]
+
+    assert cgc[0]["declared_value"] > 200, "CGC slabs of this card sell well above raw"
+    assert psa, "PSA is in scope"
+    assert psa[0]["declared_value"] == 200.0, (
+        "no PSA sales stored, so PSA's declared value falls back to the raw card"
+    )
+    assert cgc[0]["declared_value"] != psa[0]["declared_value"], (
+        "the two graders must not share one number"
+    )
+
+
+def test_a_tier_ceiling_is_applied_against_that_graders_own_declared_value(
+    client: TestClient, card: dict
+):
+    """The bug this guards: an ineligible tier reported as available."""
+    for index in range(20):
+        add_sale(client, card["id"], days=index * 4, price=200)
+    for grade, price in ((10, 900), (9.5, 610), (9, 400)):
+        for index in range(6):
+            add_sale(
+                client, card["id"], days=index * 9, price=price,
+                company_id=company_id(client, "CGC"), grade=grade,
+            )
+    assess(client, card["id"])
+
+    options = options_block(client, card["id"], batch=25)["options"]
+    bulk = next(
+        row for row in options if row["company_code"] == "CGC" and row["tier_name"] == "Bulk"
+    )
+    if bulk["declared_value"] > 400:
+        assert bulk["available"] is False
+        assert any("ceiling" in reason for reason in bulk["blockers"])
+
+
 def test_a_company_with_no_graded_sales_says_so_rather_than_borrowing_prices(
     client: TestClient, card: dict
 ):
