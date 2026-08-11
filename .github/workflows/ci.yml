@@ -1,0 +1,134 @@
+name: CI
+
+# Runs on every pull request and every push to main.
+#
+# Three jobs rather than one, because the three failures mean genuinely
+# different things and it is worth seeing which one went red without opening the
+# log: the backend broke, the UI broke, or the browser demo has drifted away
+# from the server it is imitating.
+#
+# `make check` runs the same four things locally. If that passes and this fails,
+# one of the two is lying — keep them in step.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A pull request that is pushed to twice should not run twice. Pushes to main
+# are never cancelled: those are the ones the deploy follows.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '22'
+
+jobs:
+  backend:
+    name: Backend — tests and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install
+        run: pip install -r backend/requirements-dev.txt
+
+      # Lint first: it takes seconds, and a lint failure is quicker to read
+      # than a test failure caused by the same typo.
+      - name: Lint
+        working-directory: backend
+        run: ruff check .
+
+      - name: Tests
+        working-directory: backend
+        run: python -m pytest -q
+
+      # docs/schema.sql is generated from the models. A model change that
+      # forgets `make schema` leaves the documented schema quietly wrong, which
+      # is worse than having none.
+      - name: Schema docs are current
+        run: |
+          cd backend && python -m scripts.dump_schema >/dev/null && cd ..
+          if ! git diff --quiet -- docs/; then
+            echo "::error::docs/ is out of date with the models. Run 'make schema' and commit."
+            git --no-pager diff --stat -- docs/
+            exit 1
+          fi
+
+  frontend:
+    name: Frontend — types and builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      # The demo is what GitHub Pages serves. Without this, a demo-only break
+      # would not surface until the deploy runs — after the merge.
+      - name: Build the demo
+        working-directory: frontend
+        run: npm run build:demo
+
+  parity:
+    name: Engine parity — demo against server
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: |
+          pip install -r backend/requirements-dev.txt
+          cd frontend && npm ci
+
+      # src/lib/demo/ is a hand-maintained TypeScript port of the backend
+      # engines, so it can drift without anything failing to compile. This runs
+      # both over the same cases and compares every field.
+      - name: Compare the engines
+        run: make parity
