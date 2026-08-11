@@ -41,13 +41,3 @@ def refresh_market() -> None:
         phase=3,
         planned_in="Phase 3 — MarketDataProvider adapters, once API credentials exist.",
     )
-
-
-@router.get("/analytics/accuracy", summary="Predicted vs actual grading accuracy (Phase 8)")
-def accuracy() -> None:
-    _stub(
-        "Prediction accuracy needs graded results to compare against. Results are already "
-        "modelled in prediction_results, so calibration can start as soon as submissions return.",
-        phase=8,
-        planned_in="Phase 8 — learning system: personal grading bias and model calibration.",
-    )

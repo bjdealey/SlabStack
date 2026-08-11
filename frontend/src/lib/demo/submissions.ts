@@ -37,8 +37,11 @@ export interface StoredLine {
   declared_value_minor: number | null
   declared_value_source: string
   declared_value_confidence: string | null
-  /** Frozen when the card joined the parcel — the prediction worth scoring. */
+  /** Both frozen when the card joined the parcel — the prediction worth scoring.
+   *  The scalar says "predicted 9.5, got 10"; the distribution is what a Brier
+   *  score actually marks, and it cannot be computed from the mode. */
   predicted_grade: number | null
+  predicted_probabilities: Record<string, number> | null
   actual_grade: number | null
   cert_number: string | null
   status: string

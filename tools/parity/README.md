@@ -15,7 +15,7 @@ field:
 make parity
 ```
 
-`cases.json` holds three sets of hand-built scenarios.
+`cases.json` holds five sets of hand-built scenarios.
 
 **`cases`** exercise the decision engine's branches — a well-evidenced grade, a
 card where only the top grade has ever sold, both risk tolerances, and a route
@@ -29,6 +29,16 @@ firing, and the two cases where it must *not* fire: a quartile sitting below the
 realistic price, and one exactly equal to it. Capping there would suggest asking
 *less* than the card fetches. Two cases exist purely to catch a floor/round swap,
 following the lesson below.
+
+**`scoring`** exercise the Brier score behind the learning system: a perfect confident call, a
+confident wrong one, a hedged wrong one, a full ladder, half grades, nothing to mark, and — the one
+easiest to get quietly wrong — a grade the model ruled out entirely, which must score as a maximal
+miss rather than being skipped.
+
+**`corrections`** exercise the learned correction as pure arithmetic over the signed errors: under
+and over the minimum sample, the offset clamp, calibration switched off, nothing to correct, a wide
+scatter that widens the range, and a single result that has no spread to measure. Both the numbers
+and the sentences are compared, because the sentence is what the user actually reads.
 
 **`allocations`** exercise the penny-exact split behind submission costing,
 which is the other place two hand-written implementations drift. Several cases

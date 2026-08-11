@@ -635,6 +635,7 @@ CREATE TABLE submission_cards (
 	grading_fee_minor INTEGER, 
 	allocated_overhead_minor INTEGER, 
 	predicted_grade FLOAT, 
+	predicted_probabilities JSON, 
 	actual_grade FLOAT, 
 	cert_number VARCHAR(64), 
 	status VARCHAR(24) NOT NULL, 

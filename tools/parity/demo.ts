@@ -12,6 +12,7 @@ import type { DecisionInputs } from '@/lib/demo/decision'
 import { decide, evaluateRoute, thresholdsFrom } from '@/lib/demo/decision'
 import { allocateWeighted } from '@/lib/demo/submissions'
 import { suggestedListingMinor } from '@/lib/demo/analytics'
+import { brierScore, correctionFromErrors } from '@/lib/demo/calibration'
 
 interface ParityCase {
   name: string
@@ -32,6 +33,20 @@ interface ListingCase {
   liquidityScore: number | null
 }
 
+interface ScoringCase {
+  name: string
+  probabilities: Record<string, number>
+  actual: number
+}
+
+interface CorrectionCase {
+  name: string
+  errors: number[]
+  minimumSample: number
+  maxOffset: number
+  enabled: boolean
+}
+
 interface AllocationCase {
   name: string
   totalMinor: number
@@ -39,11 +54,13 @@ interface AllocationCase {
 }
 
 const here = dirname(fileURLToPath(import.meta.url))
-const { cases, listings, allocations } = JSON.parse(
+const { cases, listings, scoring, corrections, allocations } = JSON.parse(
   readFileSync(join(here, 'cases.json'), 'utf8'),
 ) as {
   cases: ParityCase[]
   listings: ListingCase[]
+  scoring: ScoringCase[]
+  corrections: CorrectionCase[]
   allocations: AllocationCase[]
 }
 
@@ -114,6 +131,34 @@ const listingOutput = listings.map((testCase) => {
   return { name: testCase.name, asking_minor: asking, basis }
 })
 
+/** The Brier score, which both sides implement alone. */
+const scoringOutput = scoring.map((testCase) => ({
+  name: testCase.name,
+  brier: brierScore(
+    Object.keys(testCase.probabilities).length ? testCase.probabilities : null,
+    testCase.actual,
+  ),
+}))
+
+/** The learned correction, as pure arithmetic over the signed errors. */
+const correctionOutput = corrections.map((testCase) => {
+  const entry = correctionFromErrors(testCase.errors, {
+    companyCode: 'CGC',
+    minimumSample: testCase.minimumSample,
+    maxOffset: testCase.maxOffset,
+    enabled: testCase.enabled,
+  })
+  return {
+    name: testCase.name,
+    sample_size: entry.sample_size,
+    grade_offset: entry.grade_offset,
+    spread_multiplier: entry.spread_multiplier,
+    applied: entry.applied,
+    confidence: entry.confidence,
+    reason: entry.reason,
+  }
+})
+
 /** The split itself, where a penny is easiest to lose. */
 const allocationOutput = allocations.map((testCase) => {
   const parts = allocateWeighted(testCase.totalMinor, testCase.weights)
@@ -123,7 +168,13 @@ const allocationOutput = allocations.map((testCase) => {
 
 console.log(
   JSON.stringify(
-    { decisions: output, listings: listingOutput, allocations: allocationOutput },
+    {
+      decisions: output,
+      scoring: scoringOutput,
+      corrections: correctionOutput,
+      listings: listingOutput,
+      allocations: allocationOutput,
+    },
     null,
     2,
   ),

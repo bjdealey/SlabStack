@@ -18,7 +18,14 @@ from datetime import date, datetime
 
 from pydantic import Field
 
-from app.enums import BlockStatus, Confidence, Decision, LiquidityBand, TrendDirection
+from app.enums import (
+    BlockStatus,
+    Confidence,
+    Decision,
+    LiquidityBand,
+    PredictionSource,
+    TrendDirection,
+)
 from app.schemas.common import ApiModel
 
 ENGINE_VERSION = "0.1.0"
@@ -102,6 +109,26 @@ class CompanyGradePrediction(ApiModel):
     confidence: str = Confidence.NONE.value
     caps_applied: list[str] = Field(default_factory=list)
     is_user_override: bool = False
+
+    # --- What your own returned grades changed (Phase 8) --------------------
+    # The raw model output is kept beside the corrected one rather than
+    # replaced. A silent adjustment is untrustworthy: you cannot tell whether a
+    # prediction moved because the card is different or because the model
+    # learned something.
+    source: str = PredictionSource.RULES_ENGINE.value
+    uncalibrated_likely_grade: float | None = Field(
+        default=None, description="What the model said before your history was applied."
+    )
+    uncalibrated_probabilities: list[GradeProbability] = Field(default_factory=list)
+    calibration_offset: float | None = Field(
+        default=None,
+        description="Grades the centre moved, learned from your results. Null when nothing "
+        "was applied.",
+    )
+    calibration_sample_size: int | None = Field(
+        default=None, description="How many of your returned grades that correction rests on."
+    )
+    calibration_note: str | None = None
 
 
 class GradePredictionBlock(EvaluationBlock):

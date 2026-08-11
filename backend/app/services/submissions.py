@@ -226,8 +226,10 @@ def _probabilities_for(
     return prediction.probabilities
 
 
-def predicted_grade_for(db: Session, card_id: str, company: GradingCompany | None) -> float | None:
-    """The grade the model expects from this grader, as of right now.
+def predicted_grade_for(
+    db: Session, card_id: str, company: GradingCompany | None
+) -> tuple[float | None, dict[str, float] | None]:
+    """What the model expects from this grader, as of right now.
 
     Written when the card joins the parcel rather than read back when it
     returns, and that ordering is the whole point. The prediction being scored
@@ -235,17 +237,22 @@ def predicted_grade_for(db: Session, card_id: str, company: GradingCompany | Non
     it later would grade a model against an outcome it has already seen, which
     measures nothing. It is a snapshot, so it is stored rather than derived.
 
-    ``None`` when the card has no assessment, which is honest: no prediction was
-    made, so there is nothing to be right or wrong about.
+    Returns the most likely grade *and* the whole distribution, because they
+    answer different questions. "Predicted 9.5, got 10" needs the first; scoring
+    how good the prediction was needs the second — 55% on a 10 and 95% on a 10
+    are very different claims with the same mode.
+
+    ``(None, None)`` when the card has no assessment, which is honest: no
+    prediction was made, so there is nothing to be right or wrong about.
     """
     if company is None:
-        return None
+        return None, None
     card = db.get(Card, card_id)
     if card is None:  # pragma: no cover - callers check first
-        return None
+        return None, None
     assessment = cards_service.current_condition(db, card_id)
     if assessment is None:
-        return None
+        return None, None
 
     # A user override outranks the model, because it is what the user believed.
     override = next(
@@ -258,7 +265,7 @@ def predicted_grade_for(db: Session, card_id: str, company: GradingCompany | Non
         None,
     )
     if override is not None:
-        return override.likely_grade
+        return override.likely_grade, dict(override.probabilities or {})
 
     try:
         prediction = prediction_service.predict(
@@ -270,8 +277,8 @@ def predicted_grade_for(db: Session, card_id: str, company: GradingCompany | Non
             ),
         )
     except prediction_service.NotEnoughAssessmentError:
-        return None
-    return prediction.likely_grade
+        return None, None
+    return prediction.likely_grade, dict(prediction.probabilities)
 
 
 def _held_membership(company: GradingCompany, today: date) -> GradingMembership | None:

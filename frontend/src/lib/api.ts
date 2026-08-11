@@ -1,4 +1,5 @@
 import type {
+  AccuracyReport,
   ApiErrorBody,
   Card,
   CardEvaluation,
@@ -6,6 +7,7 @@ import type {
   CardSet,
   CardVariant,
   CardWrite,
+  CalibrationState,
   CollectionDecisions,
   CollectionFilter,
   CollectionSummary,
@@ -251,6 +253,10 @@ export const api = {
   applyFilter: (key: string, batchSize = 1) =>
     request<FilterResult>(`/analytics/filters/${key}${query({ batch_size: batchSize })}`),
 
+  // --- Learning ------------------------------------------------------------
+  accuracy: () => request<AccuracyReport>('/analytics/accuracy'),
+  calibration: () => request<CalibrationState>('/calibration'),
+
   // --- Reference data ------------------------------------------------------
   listSets: (q?: string) => request<CardSet[]>(`/sets${query({ q })}`),
   listVariants: () => request<CardVariant[]>('/variants'),
@@ -343,6 +349,8 @@ export const keys = {
   sellingQueue: ['selling-queue'] as const,
   submissionReturns: ['submission-returns'] as const,
   collectionFilters: ['collection-filters'] as const,
+  accuracy: ['accuracy'] as const,
+  calibration: ['calibration'] as const,
   filterResult: (key: string, batchSize = 1) => ['filter-result', key, batchSize] as const,
   facets: ['facets'] as const,
   sets: (q?: string) => ['sets', q ?? ''] as const,

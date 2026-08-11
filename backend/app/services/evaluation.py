@@ -61,6 +61,7 @@ from app.schemas.evaluation import (
     TrendBlock,
 )
 from app.services import (
+    calibration,
     cards_service,
     condition_service,
     decision,
@@ -278,13 +279,32 @@ def _build_grade_prediction_block(
             )
             continue
 
-        result = prediction_service.predict(
+        rules = prediction_service.load_rules(db, company.id)
+        raw = prediction_service.predict(
             assessment,
             company=company,
-            rules=prediction_service.load_rules(db, company.id),
+            rules=rules,
             params=params,
             kind=PredictionKind.MARKET.value,
         )
+
+        # What this grader's own history says to do differently. Computed even
+        # when it will not be applied, because "measured 0.4 high across 3 cards,
+        # not correcting yet" is worth showing.
+        learned = calibration.calibration_for(db, company)
+        result = raw
+        if learned.applied and not learned.is_identity:
+            result = prediction_service.predict(
+                assessment,
+                company=company,
+                rules=rules,
+                params=params,
+                kind=PredictionKind.MARKET.value,
+                calibration_offset=learned.grade_offset,
+                spread_multiplier=learned.spread_multiplier,
+            )
+
+        corrected = result is not raw
         by_company.append(
             CompanyGradePrediction(
                 company_id=company.id,
@@ -298,6 +318,22 @@ def _build_grade_prediction_block(
                 confidence=result.confidence,
                 caps_applied=[cap["label"] for cap in result.caps_applied],
                 is_user_override=False,
+                source=(
+                    PredictionSource.CALIBRATED.value
+                    if corrected
+                    else PredictionSource.RULES_ENGINE.value
+                ),
+                # The raw model is kept beside the corrected one, never replaced
+                # by it: a silent adjustment leaves you unable to tell whether a
+                # prediction moved because the card differs or because the model
+                # learned something.
+                uncalibrated_likely_grade=raw.likely_grade if corrected else None,
+                uncalibrated_probabilities=(
+                    _to_probabilities(raw.probabilities, company.code) if corrected else []
+                ),
+                calibration_offset=learned.grade_offset if corrected else None,
+                calibration_sample_size=learned.sample_size or None,
+                calibration_note=learned.reason,
             )
         )
 

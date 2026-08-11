@@ -21,6 +21,7 @@ import type {
   SubmissionReturns,
 } from '@/lib/types'
 import { PageHeader } from '@/components/AppShell'
+import { Accuracy } from '@/components/Accuracy'
 import { DecisionBadge, StatusBadge } from '@/components/DecisionBadge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -48,7 +49,7 @@ export function Analytics() {
     <>
       <PageHeader
         title="Analytics"
-        description="What to send, what to list, what came back, and the cuts to find them."
+        description="What to send, what to list, what came back, the cuts to find them, and how well the model has been calling it."
       />
       <div className="p-6">
         <Tabs defaultValue="opportunities" className="space-y-6">
@@ -57,6 +58,7 @@ export function Analytics() {
             <TabsTrigger value="selling">What to sell</TabsTrigger>
             <TabsTrigger value="returns">What came back</TabsTrigger>
             <TabsTrigger value="filters">Cuts</TabsTrigger>
+            <TabsTrigger value="accuracy">How it's doing</TabsTrigger>
           </TabsList>
 
           <TabsContent value="opportunities">
@@ -70,6 +72,9 @@ export function Analytics() {
           </TabsContent>
           <TabsContent value="filters">
             <FiltersTab />
+          </TabsContent>
+          <TabsContent value="accuracy">
+            <Accuracy />
           </TabsContent>
         </Tabs>
       </div>

@@ -787,7 +787,8 @@ survives re-imports and reclassification.
 | GET    | `/api/analytics/submission-returns`             | ✅     | Predicted grades against the ones that came back. |
 | GET    | `/api/analytics/filters`                        | ✅     | The saved cuts on offer.      |
 | GET    | `/api/analytics/filters/{key}`                  | ✅     | Apply one saved cut.          |
-| GET    | `/api/analytics/accuracy`                       | ⏳ P8  | Predicted vs actual grades.   |
+| GET    | `/api/analytics/accuracy`                       | ✅     | Predicted vs actual grades, marked. |
+| GET    | `/api/calibration`                              | ✅     | What those results taught the model. |
 
 ### Costing a submission
 
@@ -1048,6 +1049,122 @@ short list is never mistaken for a complete one.
   "items": [ /* the same Opportunity shape as /api/collection/decisions */ ]
 }
 ```
+
+### Learning from what came back
+
+The only part of this API that reasons backwards. Everything else goes condition → distribution →
+value → verdict; this takes grades that actually came back and asks whether the model that predicted
+them was any good.
+
+**What gets marked is the prediction that was actually held.** `submission_cards` freezes both
+`predicted_grade` and `predicted_probabilities` when a card joins a parcel. Scoring a distribution
+recomputed after the grade is known would mark the model against an outcome it has already seen,
+which measures nothing and flatters it enormously. A card sent with no assessment has no frozen
+prediction, cannot be marked, and is counted in `awaiting` rather than dropped.
+
+**`GET /api/analytics/accuracy`** — query `limit` (default 500).
+
+```jsonc
+{
+  "status": "partial",
+  "reason": "1 graded card(s) had no prediction recorded when they were sent…",
+  "scored": 15, "awaiting": 1, "minimum_sample": 10,
+  "companies": [{
+    "company_id": "…", "company_code": "CGC", "company_name": "CGC Cards",
+    "scored": 12,
+    "exact_pct": 0.0, "within_half_pct": 16.7, "within_one_pct": 75.0,
+    "mean_error": -1.083,        // the bias, signed: negative = comes back worse
+    "mean_absolute_error": 1.083,
+    "error_stdev": 0.417,
+    "mean_brier": 1.3743,        // marks the whole distribution, not the mode
+    "bands": [{                  // the calibration curve
+      "grade": 10,
+      "predicted_count": 8.19, "actual_count": 0,
+      "predicted_rate": 0.6825, "actual_rate": 0.0,
+      "gap_pct": -68.3           // negative: predicted far more often than it happens
+    }],
+    "headline": "Your predicted CGC 10 rate runs 68 points above your actual rate.",
+    "status": "ok", "reason": null
+  }],
+  "results": [{
+    "card_id": "…", "name": "Umbreon VMAX 215/203", "company_code": "CGC",
+    "predicted_grade": 10, "actual_grade": 9,
+    "surprise": -1,              // positive means it graded better than predicted
+    "brier": 1.31,
+    "graded_at": "2026-07-22"
+  }]
+}
+```
+
+A **Brier score** marks the probability vector against reality — 1 on the grade that happened, 0
+elsewhere. Being 95% sure of a 10 and being 40% sure of a 10 are very different claims with the same
+mode, and only this notices when the confident one is wrong. A grade the model gave *zero*
+probability scores as a maximal miss rather than being skipped.
+
+**`GET /api/calibration`** — no parameters.
+
+```jsonc
+{
+  "enabled": true, "minimum_sample": 10, "max_offset": 1.0,
+  "companies": [{
+    "company_id": "…", "company_code": "CGC",
+    "sample_size": 12, "minimum_sample": 10,
+    "grade_offset": -1.0,        // grades added to the model's centre
+    "spread_multiplier": 1.0,    // above 1.0 the model was over-confident
+    "applied": true,
+    "confidence": "low",
+    "reason": "Learned from 12 CGC result(s): the centre moves down by 1.00 grades."
+  }]
+}
+```
+
+The correction lands on the two parameters the model already has — where the distribution is centred
+and how wide it is — rather than a new mechanism. That keeps it inspectable: a calibrated prediction
+is the same model with a shifted centre, and the shift is a number you can read.
+
+**Three restraints, and they matter more than the arithmetic.**
+
+*Measured from the first result, applied only past `minimum_sample`.* Below it, `applied` is `false`
+and the offset is still reported. A bias fitted to four slabs is fitted to noise, and silently
+correcting for noise makes the model worse without saying so.
+
+*Clamped at `calibration_max_offset`.* A measured two-grade bias is far likelier to be a run of odd
+cards than a real one.
+
+*Never pooled across graders.* PSA's bias is not CGC's, and a correction learned across both
+describes neither.
+
+The spread multiplier is never allowed below 1.0: claiming *more* precision than the rules engine
+does, on the strength of a few dozen cards, is exactly backwards.
+
+**Kept apart from `strictness`.** That per-company setting is an opinion you hold about a grader;
+this is an observation measured from your results. Merging them would lose the ability to tell them
+apart — and to switch one off.
+
+### Calibration on a card
+
+`grade_prediction.by_company[]` carries the raw model beside the corrected one, because a silent
+adjustment is untrustworthy: you could not tell whether a prediction moved because the card differs
+or because the model learned something.
+
+```jsonc
+{
+  "company_code": "CGC",
+  "likely_grade": 9,                    // what you are being told now
+  "source": "calibrated",               // or "rules_engine" / "user_override"
+  "uncalibrated_likely_grade": 10,      // what the model said before your history
+  "uncalibrated_probabilities": [ … ],  // the raw distribution, not just its mode
+  "calibration_offset": -1.0,
+  "calibration_sample_size": 12,
+  "calibration_note": "Learned from 12 CGC result(s): the centre moves down by 1.00 grades."
+}
+```
+
+`calibration_note` is present whether or not a correction was applied — "3 of the 10 results needed
+before a correction is applied" is worth reading on the card itself. `calibration_offset` is `null`
+when nothing was applied, and `source` stays `rules_engine`.
+
+A **user override still wins.** Learned or not, the model does not overrule a number the user typed.
 
 ---
 

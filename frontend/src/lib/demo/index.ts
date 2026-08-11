@@ -49,6 +49,13 @@ import {
   buildSubmissionReturns,
   rankOpportunities,
 } from './analytics'
+import type { ResultRow } from './calibration'
+import {
+  DEFAULT_MAX_OFFSET,
+  DEFAULT_MINIMUM_SAMPLE,
+  buildAccuracyReport,
+  calibrationFor,
+} from './calibration'
 import { SEED_CARDS, SEED_MARKET } from './seed'
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO === 'true'
@@ -241,25 +248,45 @@ function seedSubmissions(seeded: Store): void {
   const day = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString()
   const economy = cgc.tiers.find((tier) => tier.tier_name === 'Economy') ?? cgc.tiers[0] ?? null
 
+  // The frozen prediction is computed from the model rather than hand-written,
+  // so the demo's Brier scores and calibration curve are real arithmetic over a
+  // real distribution instead of decorative numbers.
+  const frozen = (cardId: string, company: GradingCompany) => {
+    const assessment = seeded.conditions.get(cardId)
+    if (!assessment) return { likely: null, probabilities: null }
+    const row = buildGradePrediction(assessment, [company]).by_company[0]
+    if (!row) return { likely: null, probabilities: null }
+    return {
+      likely: row.likely_grade,
+      probabilities: Object.fromEntries(
+        row.probabilities.map((item) => [String(item.grade), item.probability]),
+      ),
+    }
+  }
+
   const line = (
     cardId: string,
     order: number,
-    predicted: number | null,
+    company: GradingCompany,
     actual: number | null,
-  ): StoredLine => ({
-    id: `demo-line-${cardId}-${order}`,
-    card_id: cardId,
-    tier_id: economy?.id ?? null,
-    declared_value_minor: null,
-    declared_value_source: 'system',
-    declared_value_confidence: null,
-    predicted_grade: predicted,
-    actual_grade: actual,
-    cert_number: actual === null ? null : `10${order}9944${order}`,
-    status: actual === null ? 'planned' : 'graded',
-    sort_order: order,
-    notes: null,
-  })
+  ): StoredLine => {
+    const prediction = frozen(cardId, company)
+    return {
+      id: `demo-line-${cardId}-${order}`,
+      card_id: cardId,
+      tier_id: economy?.id ?? null,
+      declared_value_minor: null,
+      declared_value_source: 'system',
+      declared_value_confidence: null,
+      predicted_grade: prediction.likely,
+      predicted_probabilities: prediction.probabilities,
+      actual_grade: actual,
+      cert_number: actual === null ? null : `10${order}9944${order}`,
+      status: actual === null ? 'planned' : 'graded',
+      sort_order: order,
+      notes: null,
+    }
+  }
 
   if (umbreon && promo) {
     seeded.submissions.push({
@@ -285,12 +312,59 @@ function seedSubmissions(seeded: Store): void {
       notes: null,
       created_at: day(100),
       cards: [
-        // Predicted 9.5 and came back a 10: the good surprise.
-        line(umbreon.id, 0, 9.5, 10),
-        // Predicted 9.5 and came back a 6. Nobody has sold a CGC 6 of it, so it
-        // cannot be valued — which is the point of including it.
-        line(promo.id, 1, 9.5, 6),
+        // Came back a 10, above what the model expected: the good surprise.
+        line(umbreon.id, 0, cgc, 10),
+        // Came back a 6. Nobody has sold a CGC 6 of it, so it cannot be valued
+        // either — which is the other half of the point of including it.
+        line(promo.id, 1, cgc, 6),
       ],
+    })
+  }
+
+  // An earlier CGC parcel, so the demo crosses the threshold where a correction
+  // starts being applied. Without it the learning view only ever shows its
+  // least interesting state — measured, never acted on — and the whole point of
+  // the phase is what happens once there is enough evidence to act.
+  const earlier = [
+    ['Eevee Heroes Promo 2', 9],
+    ['Eevee Heroes Promo 3', 9],
+    ['Eevee Heroes Promo 4', 9.5],
+    ['Eevee Heroes Promo 5', 9],
+    ['Giratina VSTAR', 8.5],
+    ['Pikachu', 9],
+    ['Rayquaza VMAX', 9],
+    ['Mew ex', 9.5],
+  ] as const
+  const earlierLines = earlier
+    .map(([name, grade], index) => {
+      const card = find(name)
+      return card ? line(card.id, index, cgc, grade) : null
+    })
+    .filter((row): row is StoredLine => row !== null)
+
+  if (earlierLines.length) {
+    seeded.submissions.push({
+      id: 'demo-submission-earlier',
+      reference: 'SUB-2026-02-001',
+      name: 'Winter bulk',
+      company_id: cgc.id,
+      tier_id: economy?.id ?? null,
+      status: 'returned',
+      currency: (seeded.settings.currency as string) ?? 'GBP',
+      cost_allocation_method: 'equal',
+      shipping_out_minor: 2000,
+      shipping_return_minor: 2000,
+      handling_minor: 0,
+      other_fees_minor: 0,
+      membership_allocation_minor: 0,
+      submitted_at: day(212),
+      received_at: day(204),
+      returned_at: day(150),
+      tracking_outbound: null,
+      tracking_return: null,
+      notes: null,
+      created_at: day(216),
+      cards: earlierLines,
     })
   }
 
@@ -316,7 +390,7 @@ function seedSubmissions(seeded: Store): void {
       tracking_return: null,
       notes: null,
       created_at: day(14),
-      cards: [line(gengar.id, 0, 9, null)],
+      cards: [line(gengar.id, 0, psa, null)],
     })
   }
 }
@@ -498,6 +572,7 @@ function evaluationFor(card: Card, batchSize = 1): CardEvaluation {
     sellingProfile(),
     batchSize,
     salesByLabel(card),
+    calibrationInput,
   )
 }
 
@@ -538,6 +613,83 @@ function sellingQueue() {
       purchasePrice: card?.purchase_price ?? null,
     }
   })
+}
+
+/**
+ * Every graded card that had a prediction frozen behind it, ready to be marked.
+ *
+ * Read from the submission lines rather than a separate results store: the
+ * lines *are* the record, and a second copy would be the one that drifts.
+ */
+function resultRows(): ResultRow[] {
+  const rows: ResultRow[] = []
+  for (const submission of store.submissions) {
+    const company = store.companies.find((item) => item.id === submission.company_id)
+    if (!company) continue
+    for (const line of submission.cards) {
+      if (line.actual_grade === null || !line.predicted_probabilities) continue
+      const card = store.cards.find((item) => item.id === line.card_id)
+      rows.push({
+        cardId: line.card_id,
+        name: card ? (card.card_number ? `${card.name} ${card.card_number}` : card.name) : line.card_id,
+        companyId: company.id,
+        companyCode: company.code,
+        actualGrade: line.actual_grade,
+        predictedGrade: line.predicted_grade,
+        predictedProbabilities: line.predicted_probabilities,
+        gradedAt: submission.returned_at?.slice(0, 10) ?? null,
+      })
+    }
+  }
+  return rows
+}
+
+/** Graded but never scoreable: no prediction was frozen when they were sent. */
+function unscoreableCount(): number {
+  let count = 0
+  for (const submission of store.submissions) {
+    for (const line of submission.cards) {
+      if (line.actual_grade !== null && !line.predicted_probabilities) count += 1
+    }
+  }
+  return count
+}
+
+function calibrationOptions() {
+  return {
+    minimumSample: Number(store.settings.calibration_minimum_sample ?? DEFAULT_MINIMUM_SAMPLE) ||
+      DEFAULT_MINIMUM_SAMPLE,
+    maxOffset: Number(store.settings.calibration_max_offset ?? DEFAULT_MAX_OFFSET) ||
+      DEFAULT_MAX_OFFSET,
+    enabled: store.settings.calibration_enabled !== false,
+  }
+}
+
+function calibrationState() {
+  const options = calibrationOptions()
+  const rows = resultRows()
+  return {
+    enabled: options.enabled,
+    minimum_sample: options.minimumSample,
+    max_offset: options.maxOffset,
+    companies: store.companies
+      .filter((company) => company.active !== false)
+      .map((company) => calibrationFor(company, rows, options)),
+  }
+}
+
+/** What the user's results taught the model about one grader, for `predictGrade`. */
+function calibrationInput(companyId: string | null) {
+  if (!companyId) return undefined
+  const company = store.companies.find((item) => item.id === companyId)
+  if (!company) return undefined
+  const entry = calibrationFor(company, resultRows(), calibrationOptions())
+  return {
+    offset: entry.applied ? entry.grade_offset : 0,
+    spreadMultiplier: entry.applied ? entry.spread_multiplier : 1,
+    sampleSize: entry.sample_size,
+    note: entry.reason,
+  }
 }
 
 function submissionReturns() {
@@ -690,7 +842,7 @@ function declaredValueFor(card: Card, companyCode: string | null): number | null
   if (card.user_declared_value !== null) return market.toMinor(card.user_declared_value)
   const company = store.companies.find((item) => item.code === companyCode) ?? null
   const prediction = company
-    ? buildGradePrediction(store.conditions.get(card.id), [company]).by_company[0]
+    ? buildGradePrediction(store.conditions.get(card.id), [company], calibrationInput).by_company[0]
     : null
   const probabilities = prediction?.probabilities.length
     ? Object.fromEntries(prediction.probabilities.map((item) => [item.grade, item.probability]))
@@ -734,13 +886,24 @@ function requireEditable(submission: StoredSubmission): void {
  * ``null`` when the card has no assessment, which is honest: no prediction was
  * made, so there is nothing to be right or wrong about.
  */
-function predictedGradeFor(cardId: string, companyId: string | null): number | null {
-  if (!companyId) return null
+function predictedGradeFor(
+  cardId: string,
+  companyId: string | null,
+): { likely: number | null; probabilities: Record<string, number> | null } {
+  if (!companyId) return { likely: null, probabilities: null }
   const company = store.companies.find((item) => item.id === companyId)
   const assessment = store.conditions.get(cardId)
-  if (!company || !assessment) return null
+  if (!company || !assessment) return { likely: null, probabilities: null }
   const prediction = buildGradePrediction(assessment, [company])
-  return prediction.by_company[0]?.likely_grade ?? prediction.likely_grade ?? null
+  const row = prediction.by_company[0]
+  if (!row) return { likely: null, probabilities: null }
+  return {
+    likely: row.likely_grade,
+    // The whole belief, not just the mode: a Brier score marks the distribution.
+    probabilities: Object.fromEntries(
+      row.probabilities.map((item) => [String(item.grade), item.probability]),
+    ),
+  }
 }
 
 function newLine(
@@ -758,7 +921,8 @@ function newLine(
     declared_value_confidence: null,
     // Frozen now, not read back later: the prediction worth scoring is the one
     // you held when you sent the card, not one computed after the grade is in.
-    predicted_grade: predictedGradeFor(cardId, companyId),
+    predicted_grade: predictedGradeFor(cardId, companyId).likely,
+    predicted_probabilities: predictedGradeFor(cardId, companyId).probabilities,
     actual_grade: null,
     cert_number: null,
     status: 'planned',
@@ -893,7 +1057,7 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
         cards: store.cards.length,
         grading_companies: store.companies.length,
         market_sales: 0,
-        phase: '7 — analytics (demo)',
+        phase: '8 — learning (demo)',
       }),
     ],
     [method === 'GET' && pathname === '/meta/enums', () => fixtures.enums],
@@ -1174,6 +1338,17 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
     [method === 'GET' && pathname === '/analytics/selling-queue', () => sellingQueue()],
     [method === 'GET' && pathname === '/analytics/submission-returns', () => submissionReturns()],
     [method === 'GET' && pathname === '/analytics/filters', () => FILTERS],
+    [
+      method === 'GET' && pathname === '/analytics/accuracy',
+      () =>
+        buildAccuracyReport(
+          resultRows(),
+          store.companies,
+          calibrationOptions().minimumSample,
+          unscoreableCount(),
+        ),
+    ],
+    [method === 'GET' && pathname === '/calibration', () => calibrationState()],
     [
       method === 'GET' && at(0) === 'analytics' && at(1) === 'filters' && segments.length === 3,
       () => {

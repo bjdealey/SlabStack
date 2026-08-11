@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, UserPen } from 'lucide-react'
+import { AlertTriangle, GraduationCap, UserPen } from 'lucide-react'
 import type { CompanyGradePrediction, GradePredictionBlock } from '@/lib/types'
 import { ConfidenceBadge, StatusBadge } from '@/components/DecisionBadge'
 import { Badge } from '@/components/ui/badge'
@@ -91,6 +91,13 @@ function CompanyDistribution({
           <p className="tabular mt-0.5 text-3xl font-semibold leading-none text-brand">
             {company.likely_grade ?? '—'}
           </p>
+          {/* The raw model, kept beside the corrected one. A prediction that
+              moved should be seen to have moved, and by how much. */}
+          {company.uncalibrated_likely_grade !== null ? (
+            <p className="tabular mt-1 text-xs text-ink-faint">
+              was {company.uncalibrated_likely_grade} before your results
+            </p>
+          ) : null}
         </div>
         <div className="text-right">
           <p className="text-[0.7rem] uppercase tracking-wider text-ink-faint">Likely range</p>
@@ -146,6 +153,32 @@ function CompanyDistribution({
           <span>Condition sub-scores put this card at {baseGrade.toFixed(1)}/10 before rules.</span>
         ) : null}
       </div>
+
+      {/* Shown whether or not a correction was applied. "Measured 0.4 high
+          across three results, not correcting yet" is worth knowing, and
+          silently applying a learned shift would be worse than not learning. */}
+      {!company.is_user_override && company.calibration_note ? (
+        <div
+          className={cn(
+            'flex items-start gap-2 rounded-lg border px-3 py-2 text-xs',
+            company.calibration_offset !== null
+              ? 'border-brand/30 bg-brand/10 text-brand'
+              : 'border-line text-ink-faint',
+          )}
+        >
+          <GraduationCap className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-medium">
+              {company.calibration_offset !== null
+                ? `Adjusted ${company.calibration_offset > 0 ? 'up' : 'down'} ${Math.abs(
+                    company.calibration_offset,
+                  ).toFixed(2)} grades from your own results`
+                : 'Not adjusted by your results'}
+            </p>
+            <p className="mt-0.5 opacity-90">{company.calibration_note}</p>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -384,6 +384,8 @@ def predict(
     rules: list[GradeRule],
     params: ModelParameters,
     kind: str = PredictionKind.MARKET.value,
+    calibration_offset: float = 0.0,
+    spread_multiplier: float = 1.0,
 ) -> Prediction:
     """Produce a grade distribution for one card against one company.
 
@@ -392,12 +394,22 @@ def predict(
     strictness and its own rules. Spec section 8 keeps these apart because they
     fail differently: a physical estimate can be right while a market estimate
     is wrong about the grader.
+
+    ``calibration_offset`` and ``spread_multiplier`` are what the user's own
+    returned grades have taught the model about this grader — plain numbers
+    rather than an object, so this function stays pure and the learning service
+    can import it without a cycle. They default to "learned nothing", which is
+    the correct behaviour for a fresh install and for a physical prediction:
+    calibration is measured against a grader, and the physical question has none.
     """
     is_market = kind == PredictionKind.MARKET.value
 
     base, disagreement = _base_grade(assessment, params)
     completeness = float(assessment.completeness or 0.0)
     sigma = _sigma(completeness, disagreement, params)
+
+    if is_market and spread_multiplier > 1.0:
+        sigma *= spread_multiplier
 
     centre = base
     explanation: list[dict[str, Any]] = [
@@ -417,6 +429,38 @@ def predict(
                 "kind": "info",
                 "text": f"{company.code} is set to grade {direction} by {abs(strictness):.2f}.",
                 "detail": "Your setting, not a published standard — tune it in Settings → Grading.",
+            }
+        )
+
+    # Kept separate from `strictness` on purpose. That is a number the user set
+    # about the grader; this is a number measured from their own results. Adding
+    # a learned correction into the user's setting would overwrite an opinion
+    # with an observation and lose the ability to tell them apart.
+    if is_market and calibration_offset:
+        centre += calibration_offset
+        moves = "up" if calibration_offset > 0 else "down"
+        explanation.append(
+            {
+                "kind": "info",
+                "text": (
+                    f"Adjusted {moves} {abs(calibration_offset):.2f} grades from your own "
+                    f"{company.code} results."
+                ),
+                "detail": (
+                    "Learned from how your cards have actually come back, not from a published "
+                    "standard. Turn it off in Settings → Grade model."
+                ),
+            }
+        )
+    if is_market and spread_multiplier > 1.0:
+        explanation.append(
+            {
+                "kind": "warn",
+                "text": f"Range widened {(spread_multiplier - 1) * 100:.0f}% from your results.",
+                "detail": (
+                    "Your grades have scattered more widely than the model expected, so it is "
+                    "less sure than it would otherwise claim to be."
+                ),
             }
         )
 

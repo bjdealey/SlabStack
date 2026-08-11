@@ -432,5 +432,173 @@
       "highQuartileMinor": null,
       "liquidityScore": 4.0
     }
+  ],
+  "scoring": [
+    {
+      "name": "perfect and confident",
+      "probabilities": {
+        "10": 1.0
+      },
+      "actual": 10
+    },
+    {
+      "name": "confident and wrong",
+      "probabilities": {
+        "10": 0.95,
+        "9": 0.05
+      },
+      "actual": 9
+    },
+    {
+      "name": "hedged and wrong",
+      "probabilities": {
+        "10": 0.4,
+        "9": 0.6
+      },
+      "actual": 10
+    },
+    {
+      "name": "a full ladder",
+      "probabilities": {
+        "10": 0.28,
+        "9.5": 0.31,
+        "9": 0.24,
+        "8.5": 0.11,
+        "8": 0.06
+      },
+      "actual": 9
+    },
+    {
+      "name": "the grade was ruled out entirely",
+      "probabilities": {
+        "10": 0.6,
+        "9.5": 0.4
+      },
+      "actual": 8
+    },
+    {
+      "name": "half grades in the ladder",
+      "probabilities": {
+        "9.5": 0.5,
+        "9": 0.5
+      },
+      "actual": 9.5
+    },
+    {
+      "name": "nothing to mark",
+      "probabilities": {},
+      "actual": 10
+    }
+  ],
+  "corrections": [
+    {
+      "name": "no results at all",
+      "errors": [],
+      "minimumSample": 10,
+      "maxOffset": 1.0,
+      "enabled": true
+    },
+    {
+      "name": "under the threshold, measured not applied",
+      "errors": [
+        -1,
+        -1,
+        -0.5
+      ],
+      "minimumSample": 10,
+      "maxOffset": 1.0,
+      "enabled": true
+    },
+    {
+      "name": "just over the threshold",
+      "errors": [
+        -1,
+        -1,
+        -0.5,
+        -1
+      ],
+      "minimumSample": 4,
+      "maxOffset": 1.0,
+      "enabled": true
+    },
+    {
+      "name": "clamped by the maximum offset",
+      "errors": [
+        -3,
+        -3,
+        -3,
+        -3
+      ],
+      "minimumSample": 2,
+      "maxOffset": 0.5,
+      "enabled": true
+    },
+    {
+      "name": "switched off entirely",
+      "errors": [
+        -1,
+        -1,
+        -1,
+        -1
+      ],
+      "minimumSample": 2,
+      "maxOffset": 1.0,
+      "enabled": false
+    },
+    {
+      "name": "nothing to correct",
+      "errors": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "minimumSample": 2,
+      "maxOffset": 1.0,
+      "enabled": true
+    },
+    {
+      "name": "wide scatter widens the range",
+      "errors": [
+        -2,
+        2,
+        -1.5,
+        1.5,
+        -1,
+        1
+      ],
+      "minimumSample": 2,
+      "maxOffset": 1.0,
+      "enabled": true
+    },
+    {
+      "name": "high confidence at three times the sample",
+      "errors": [
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5
+      ],
+      "minimumSample": 4,
+      "maxOffset": 1.0,
+      "enabled": true
+    },
+    {
+      "name": "a single result has no spread",
+      "errors": [
+        -0.5
+      ],
+      "minimumSample": 1,
+      "maxOffset": 1.0,
+      "enabled": true
+    }
   ]
 }

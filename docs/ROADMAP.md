@@ -268,15 +268,59 @@ chart component is outstanding, and a demo store rebuilt on every page load has 
 
 ---
 
-## Phase 8 — Learning system ← next
+## Phase 8 — Learning system ✅
 
-**Build:** record actual grades into `prediction_results`, score predictions (Brier), surface the
-user's personal bias ("your predicted PSA 10 rate runs 14 points above your actual rate"), and feed
-a calibrated adjustment back into the Phase 2 model as `source: calibrated` — keeping the raw model
-output alongside it.
+**Built.** `calibration.py`, `/api/analytics/accuracy`, `/api/calibration`, and the "How it's doing"
+view.
 
-This is the feature that compounds. Everything else can be rebuilt from public data; a personal
-calibration curve can only be earned.
+The only engine here that reasons backwards. Everything else goes condition → distribution → value →
+verdict; this takes grades that actually came back and asks whether the model that predicted them
+was any good. It is also the only part that cannot be rebuilt from public data: a record of how
+*your* cards, assessed by *your* eye, come back from *your* graders can only be earned.
+
+- **Scoring** is a Brier score over the whole distribution rather than the mode, because being 95%
+  sure of a 10 and being 40% sure of a 10 are very different claims with the same mode. A grade the
+  model gave zero probability scores as a maximal miss rather than being skipped.
+- **The bias** is the mean signed error, per grader, reported next to exact / within-half /
+  within-one hit rates and a calibration curve — predicted rate against observed rate, per rung of
+  the ladder. The headline names the worst rung, which is the sentence the spec asked for.
+- **The correction** lands on the two parameters the model already has — where the distribution is
+  centred and how wide it is — rather than a new mechanism. That keeps it inspectable: a calibrated
+  prediction is the same model with a shifted centre, and the shift is a number you can read.
+- **The raw model is kept beside the corrected one**, on the card page as well as in the API. A
+  silent adjustment is untrustworthy: you could not tell whether a prediction moved because the card
+  differs or because the model learned something.
+
+**Three refusals matter more than the arithmetic.** It will not score a prediction made after the
+fact — `submission_cards` freezes the whole distribution when a card *joins* a parcel, because
+marking one recomputed afterwards grades a model against an outcome it has already seen. It will not
+learn from a handful of results — below `calibration_minimum_sample` the bias is measured, reported
+and explicitly not applied, and the offset is clamped besides. And it will not pool graders, because
+PSA's bias is not CGC's and a correction learned across both describes neither.
+
+**Kept apart from `strictness`**, which is an opinion the user holds about a grader rather than an
+observation measured from their results. Merging them would lose the ability to tell them apart, or
+to switch one off.
+
+**Two bugs this phase surfaced, neither in the new code.**
+`submission_cards.predicted_probabilities` needed `JSON(none_as_null=True)`: SQLAlchemy stores
+Python `None` as the JSON text `null`, which reads back as `None` in Python while `IS NULL` never
+matches — so the count of cards that *cannot* be scored came out zero while quietly hiding them. And
+PATCHing a submission's `submitted_at` / `received_at` / `returned_at` returned a 500, because the
+API took the ISO string straight to a `Date` column without parsing it.
+
+---
+
+## What is left
+
+Two 501s remain, and both wait on an external service rather than on an engine:
+`POST /api/market/refresh` needs a market-data provider's credentials and its terms reviewed, and
+`POST /api/cards/identify` needs a `CardIdentificationProvider`. The interfaces and the disabled
+`data_sources` rows are already there.
+
+The per-card price/volume/liquidity chart is also outstanding — `price_snapshots`,
+`GET /api/cards/{id}/market/history` and `SnapshotSeries` all exist and are exercised; only the
+chart component is missing.
 
 ---
 

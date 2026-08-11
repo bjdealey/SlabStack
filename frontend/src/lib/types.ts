@@ -392,6 +392,15 @@ export interface CompanyGradePrediction {
   confidence: Confidence
   caps_applied: string[]
   is_user_override: boolean
+  /** `calibrated` once your own returned grades have moved this prediction. */
+  source: string
+  /** The raw model, kept beside the corrected one rather than replaced. */
+  uncalibrated_likely_grade: number | null
+  uncalibrated_probabilities: GradeProbability[]
+  /** Grades the centre moved. Null when nothing was applied. */
+  calibration_offset: number | null
+  calibration_sample_size: number | null
+  calibration_note: string | null
 }
 
 export interface GradePredictionBlock extends EvaluationBlock {
@@ -1178,4 +1187,79 @@ export interface FilterResult {
   unclassified: number
   card_ids: string[]
   items: Opportunity[]
+}
+
+/* --- Learning (Phase 8) --------------------------------------------------- */
+
+export interface GradeBand {
+  grade: number
+  predicted_count: number
+  actual_count: number
+  predicted_rate: number | null
+  actual_rate: number | null
+  /** Actual minus predicted, in percentage points. Negative = over-predicted. */
+  gap_pct: number | null
+}
+
+export interface ScoredResult {
+  card_id: string
+  name: string
+  company_code: string | null
+  predicted_grade: number | null
+  actual_grade: number
+  /** Positive means it graded better than predicted. */
+  surprise: number | null
+  /** How wrong the whole distribution was. Lower is better. */
+  brier: number | null
+  graded_at: string | null
+}
+
+export interface CompanyAccuracy {
+  company_id: string
+  company_code: string
+  company_name: string
+  scored: number
+  exact_pct: number | null
+  within_half_pct: number | null
+  within_one_pct: number | null
+  /** Mean signed error in grades — the bias. Positive: cards beat the prediction. */
+  mean_error: number | null
+  mean_absolute_error: number | null
+  error_stdev: number | null
+  mean_brier: number | null
+  bands: GradeBand[]
+  headline: string | null
+  status: BlockStatus
+  reason: string | null
+}
+
+export interface AccuracyReport {
+  status: BlockStatus
+  reason: string | null
+  scored: number
+  /** Graded cards with no prediction behind them. Counted, not dropped. */
+  awaiting: number
+  minimum_sample: number
+  companies: CompanyAccuracy[]
+  results: ScoredResult[]
+}
+
+export interface CalibrationEntry {
+  company_id: string
+  company_code: string
+  sample_size: number
+  minimum_sample: number
+  /** Reported whether or not it is applied. */
+  grade_offset: number
+  spread_multiplier: number
+  applied: boolean
+  confidence: Confidence
+  reason: string | null
+}
+
+export interface CalibrationState {
+  enabled: boolean
+  minimum_sample: number
+  max_offset: number
+  companies: CalibrationEntry[]
 }
