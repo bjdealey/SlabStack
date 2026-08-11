@@ -192,7 +192,6 @@ def test_enums_endpoint_feeds_the_ui(client: TestClient):
 
 def test_later_phase_endpoints_report_their_phase(client: TestClient):
     for path, phase in (
-        ("/api/market/prices", 3),
         ("/api/submissions", 6),
         ("/api/analytics/opportunities", 7),
         ("/api/analytics/accuracy", 8),
@@ -200,3 +199,12 @@ def test_later_phase_endpoints_report_their_phase(client: TestClient):
         response = client.get(path)
         assert response.status_code == 501, path
         assert response.json()["error"]["details"]["phase"] == phase
+
+
+def test_provider_sync_says_valuation_already_works_without_it(client: TestClient):
+    """A 501 should tell the user what they *can* do, not just what they cannot."""
+    response = client.post("/api/market/refresh")
+    assert response.status_code == 501
+    body = response.json()["error"]
+    assert body["details"]["phase"] == 3
+    assert "CSV" in body["message"]

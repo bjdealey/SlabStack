@@ -20,7 +20,13 @@ from app.schemas.card import (
 )
 from app.schemas.common import Page
 from app.schemas.evaluation import CardEvaluation
-from app.services import cards_service, evaluation
+from app.services import (
+    cards_service,
+    evaluation,
+    market_service,
+    sales_import,
+    settings_service,
+)
 from app.services.cards_service import CardFilters
 
 router = APIRouter(prefix="/cards", tags=["cards"])
@@ -122,16 +128,49 @@ def get_card(db: DbSession, card: CardDep) -> CardOut:
     return CardOut.from_model(card, has_condition_assessment=assessed)
 
 
-@router.patch("/{card_id}", response_model=CardOut, summary="Update a card")
+@router.patch(
+    "/{card_id}",
+    response_model=CardOut,
+    summary="Update a card",
+    description=(
+        "Editing the name, number, set, variant, language or printing changes the card's "
+        "identity. Sales recorded against this card follow it and are re-judged against the "
+        "new identity, so a corrected language does not leave the market history stranded — "
+        "nor quietly count English comparables toward a Japanese card."
+    ),
+)
 def update_card(db: DbSession, card: CardDep, payload: CardUpdate) -> CardOut:
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         return CardOut.from_model(card)
+    previous_key = card.catalog_key
     apply_card_payload(card, changes)
     cards_service.resolve_references(db, card)
     db.flush()
+    if previous_key and card.catalog_key and previous_key != card.catalog_key:
+        _follow_identity_change(db, card, previous_key)
     assessed = cards_service.current_condition(db, card.id) is not None
     return CardOut.from_model(card, has_condition_assessment=assessed)
+
+
+def _follow_identity_change(db: DbSession, card: Card, previous_key: str) -> None:
+    """Move this card's own market rows onto its new identity and re-filter them."""
+    moved = sales_import.migrate_card_key(db, card.id, previous_key, card.catalog_key)
+    if not moved:
+        return
+    context = sales_import.SaleContext(
+        catalog_key=card.catalog_key,
+        language=card.language,
+        variant=card.variant,
+        printing=card.printing,
+    )
+    sales_import.reclassify_key(db, context=context)
+    values = settings_service.get_all(db)
+    params = market_service.MarketParameters.from_settings(values)
+    sales_import.mark_outliers(db, card.catalog_key, params=params)
+    market_service.recompute_key(
+        db, card.catalog_key, params=params, currency=values.get("currency", "GBP")
+    )
 
 
 @router.delete("/{card_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a card")

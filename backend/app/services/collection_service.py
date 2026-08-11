@@ -15,7 +15,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.enums import BlockStatus, CardStatus
-from app.models import Card, CardImage, ConditionAssessment, GradingTier, MarketSale
+from app.models import (
+    Card,
+    CardImage,
+    ConditionAssessment,
+    GradingTier,
+    MarketPrice,
+    MarketSale,
+)
 from app.money import to_major
 from app.schemas.common import ApiModel
 from app.services import settings_service
@@ -106,23 +113,49 @@ def build_summary(db: Session) -> CollectionSummary:
     user_value_minor = _scalar(
         db, select(func.coalesce(func.sum(Card.user_raw_value_minor * Card.quantity), 0))
     )
-    cards_with_value = _scalar(
-        db,
-        select(func.count()).select_from(Card).where(
-            (Card.user_raw_value_minor.is_not(None)) | (Card.purchase_price_minor.is_not(None))
-        ),
+    # Best available raw value per card, in order of how close each source is to
+    # what the user would actually get: their own figure, then the market's
+    # realistic-sale estimate, then the bare median, then what they paid.
+    #
+    # Purchase price is last for a reason — it is what the card *cost*, which
+    # says nothing about what it is worth now. It is a floor to fall back on,
+    # not a valuation.
+    raw_prices = (
+        select(
+            MarketPrice.catalog_key.label("catalog_key"),
+            func.coalesce(
+                MarketPrice.user_value_minor,
+                MarketPrice.realistic_sale_minor,
+                MarketPrice.median_minor,
+            ).label("value_minor"),
+        )
+        .where(MarketPrice.grade_label == "raw")
+        .subquery()
     )
-    # Best available raw value per card: the user's own number wins, purchase
-    # price is the fallback. Market value replaces both in Phase 3.
+    best_value = func.coalesce(
+        Card.user_raw_value_minor, raw_prices.c.value_minor, Card.purchase_price_minor
+    )
+    valued = select(Card, best_value.label("best_minor")).outerjoin(
+        raw_prices, Card.catalog_key == raw_prices.c.catalog_key
+    ).subquery()
+
+    cards_with_value = _scalar(
+        db, select(func.count()).select_from(valued).where(valued.c.best_minor.is_not(None))
+    )
     known_raw_minor = _scalar(
         db,
-        select(
-            func.coalesce(
-                func.sum(
-                    func.coalesce(Card.user_raw_value_minor, Card.purchase_price_minor, 0)
-                    * Card.quantity
-                ),
-                0,
+        select(func.coalesce(func.sum(valued.c.best_minor * valued.c.quantity), 0)).select_from(
+            valued
+        ),
+    )
+    cards_market_valued = _scalar(
+        db,
+        select(func.count())
+        .select_from(valued)
+        .where(valued.c.user_raw_value_minor.is_(None), valued.c.best_minor.is_not(None))
+        .where(
+            valued.c.catalog_key.in_(
+                select(MarketPrice.catalog_key).where(MarketPrice.grade_label == "raw")
             )
         ),
     )
@@ -180,7 +213,19 @@ def build_summary(db: Session) -> CollectionSummary:
         total_cards - sum(count for _, count in override_rows), 0
     )
 
-    market_sales = _scalar(db, select(func.count()).select_from(MarketSale))
+    market_sales = _scalar(
+        db, select(func.count()).select_from(MarketSale).where(MarketSale.is_excluded.is_(False))
+    )
+    cards_with_sales = _scalar(
+        db,
+        select(func.count())
+        .select_from(Card)
+        .where(
+            Card.catalog_key.in_(
+                select(MarketSale.catalog_key).where(MarketSale.is_excluded.is_(False))
+            )
+        ),
+    )
     priced_tiers = _scalar(
         db,
         select(func.count())
@@ -221,8 +266,11 @@ def build_summary(db: Session) -> CollectionSummary:
         ReadinessItem(
             key="market_data",
             label="Comparable sales stored",
-            count=market_sales,
-            total=max(total_cards, 1),
+            # Cards covered, not sales counted: readiness is "how much of the
+            # collection can be analysed", and 143 sales across two cards leaves
+            # the other ten unanalysable.
+            count=cards_with_sales,
+            total=total_cards,
             action="Import or enter sold comparables",
         ),
     ]
@@ -244,8 +292,15 @@ def build_summary(db: Session) -> CollectionSummary:
             cards_with_value=cards_with_value,
             values_status=BlockStatus.PARTIAL.value,
             values_reason=(
-                "Raw value is your own figure or purchase price. Market valuation, graded "
-                "upside and expected profit need the market-data and decision engines."
+                f"Raw value uses your own figure where you set one, a market valuation for "
+                f"{cards_market_valued} card(s), and the purchase price otherwise. Graded "
+                "upside and expected profit need the grading-cost and decision engines."
+                if cards_market_valued
+                else (
+                    "Raw value is your own figure or purchase price — no card has comparable "
+                    "sales yet. Graded upside and expected profit need the grading-cost and "
+                    "decision engines."
+                )
             ),
         ),
         decisions=decisions,

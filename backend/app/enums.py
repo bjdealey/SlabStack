@@ -12,12 +12,11 @@ prices and fee structures change several times a year (spec sections 10, 14, 22)
 
 from __future__ import annotations
 
-from enum import Enum
+import enum
 
 
-class StrEnum(str, Enum):
-    def __str__(self) -> str:  # pragma: no cover - display helper
-        return self.value
+class StrEnum(enum.StrEnum):
+    """``enum.StrEnum`` plus ``values()``, which every route and check constraint uses."""
 
     @classmethod
     def values(cls) -> list[str]:

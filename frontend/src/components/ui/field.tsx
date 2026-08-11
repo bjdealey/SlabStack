@@ -46,6 +46,15 @@ export const Select = React.forwardRef<
 ))
 Select.displayName = 'Select'
 
+/**
+ * A labelled control.
+ *
+ * The label is tied to its control with a generated id rather than left as a
+ * sibling: an unassociated label is not announced by a screen reader and does
+ * not focus the field when clicked. The id is threaded onto the single element
+ * child, so callers write `<Field label="…"><Input /></Field>` and get the
+ * association for free.
+ */
 export function Field({
   label,
   hint,
@@ -59,10 +68,20 @@ export function Field({
   className?: string
   children: React.ReactNode
 }) {
+  const generated = React.useId()
+  let controlId: string | undefined
+
+  const control = React.Children.map(children, (child) => {
+    if (!React.isValidElement(child) || controlId !== undefined) return child
+    const props = child.props as { id?: string }
+    controlId = props.id ?? generated
+    return props.id ? child : React.cloneElement(child, { id: controlId } as never)
+  })
+
   return (
     <div className={cn('space-y-1.5', className)}>
-      {label ? <Label>{label}</Label> : null}
-      {children}
+      {label ? <Label htmlFor={controlId}>{label}</Label> : null}
+      {control}
       {error ? (
         <p className="text-xs text-negative">{error}</p>
       ) : hint ? (

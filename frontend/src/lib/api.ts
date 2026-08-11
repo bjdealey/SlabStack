@@ -16,9 +16,15 @@ import type {
   GradingCompany,
   Group,
   HealthResponse,
+  ImportResult,
+  MarketPrice,
+  MarketSale,
+  MarketSummary,
   Page,
+  SaleWrite,
   SellingProfile,
   SettingsResponse,
+  SnapshotSeries,
 } from './types'
 
 const BASE = '/api'
@@ -201,6 +207,40 @@ export const api = {
   runPrediction: (cardId: string) =>
     request<unknown[]>(`/cards/${cardId}/grade-prediction`, { method: 'POST' }),
 
+  // --- Market --------------------------------------------------------------
+  cardMarket: (cardId: string) => request<MarketSummary>(`/cards/${cardId}/market`),
+  cardSales: (cardId: string, includeExcluded = true) =>
+    request<MarketSale[]>(
+      `/cards/${cardId}/market/sales${query({ include_excluded: includeExcluded })}`,
+    ),
+  createSale: (cardId: string, payload: SaleWrite) =>
+    request<MarketSale>(`/cards/${cardId}/market/sales`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteSale: (saleId: string) => request<void>(`/market/sales/${saleId}`, { method: 'DELETE' }),
+  setSaleExclusion: (saleId: string, excluded: boolean, reason?: string) =>
+    request<MarketSale>(`/market/sales/${saleId}/exclusion`, {
+      method: 'PUT',
+      body: JSON.stringify({ excluded, reason: reason ?? null }),
+    }),
+  importSales: (cardId: string, csv: string, options: { day_first?: boolean } = {}) =>
+    request<ImportResult>(`/cards/${cardId}/market/sales/import`, {
+      method: 'POST',
+      body: JSON.stringify({ csv, day_first: options.day_first ?? true }),
+    }),
+  recomputeMarket: (cardId: string) =>
+    request<MarketSummary>(`/cards/${cardId}/market/recompute`, { method: 'POST' }),
+  reclassifySales: (cardId: string) =>
+    request<Record<string, number>>(`/cards/${cardId}/market/reclassify`, { method: 'POST' }),
+  marketHistory: (cardId: string, days = 365) =>
+    request<SnapshotSeries[]>(`/cards/${cardId}/market/history${query({ days })}`),
+  overridePrice: (priceId: string, value: number | null, note?: string | null) =>
+    request<MarketPrice>(`/market/prices/${priceId}/override`, {
+      method: 'PUT',
+      body: JSON.stringify({ value, note: note ?? null }),
+    }),
+
   // --- Configuration -------------------------------------------------------
   listGradingCompanies: () => request<GradingCompany[]>('/grading/companies'),
   updateCompany: (companyId: string, payload: Record<string, unknown>) =>
@@ -231,6 +271,9 @@ export const keys = {
   card: (id: string) => ['card', id] as const,
   evaluation: (id: string) => ['evaluation', id] as const,
   condition: (id: string) => ['condition', id] as const,
+  market: (id: string) => ['market', id] as const,
+  sales: (id: string) => ['sales', id] as const,
+  marketHistory: (id: string) => ['market-history', id] as const,
   summary: ['summary'] as const,
   facets: ['facets'] as const,
   sets: (q?: string) => ['sets', q ?? ''] as const,

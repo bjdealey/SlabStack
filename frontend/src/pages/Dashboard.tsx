@@ -74,21 +74,24 @@ export function Dashboard() {
           <StatTile
             label="Known raw value"
             value={formatMoney(values.known_raw_value, currency, { compact: true })}
-            hint={`Your estimate or purchase price, for ${values.cards_with_value} of ${totals.cards} cards`}
+            hint={`Best value for ${values.cards_with_value} of ${totals.cards} cards — yours, the market's, or what you paid`}
             icon={<Coins className="size-4" />}
           />
           <StatTile
-            label="Potential graded value"
-            value="Not calculated"
-            pending
-            hint="Needs market data (Phase 3)"
+            label="Comparable sales"
+            value={formatNumber(data.market_sales_stored)}
+            hint={
+              data.market_sales_stored
+                ? 'Sales counted toward your valuations'
+                : 'Add sales to value the collection'
+            }
             icon={<LineChart className="size-4" />}
           />
           <StatTile
             label="Expected profit"
             value="Not calculated"
             pending
-            hint="Needs the decision engine (Phase 5)"
+            hint="Needs grading costs (Phase 4) and the decision engine (Phase 5)"
             icon={<ArrowRight className="size-4" />}
           />
         </section>

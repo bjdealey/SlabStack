@@ -20,6 +20,10 @@ import type {
   ConditionWrite,
   Facets,
   GradingCompany,
+  ImportResult,
+  MarketPrice,
+  MarketSale,
+  MarketSummary,
   Page,
 } from '@/lib/types'
 import fixtures from './fixtures.json'
@@ -30,7 +34,8 @@ import {
   buildEvaluation,
   buildSummary,
 } from './engine'
-import { SEED_CARDS } from './seed'
+import * as market from './market'
+import { SEED_CARDS, SEED_MARKET } from './seed'
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO === 'true'
 
@@ -65,6 +70,10 @@ interface Store {
   conditions: Map<string, ConditionAssessment>
   companies: GradingCompany[]
   settings: Record<string, unknown>
+  /** Keyed by catalog_key, exactly as the server keys them. */
+  sales: MarketSale[]
+  prices: MarketPrice[]
+  listings: Map<string, number>
 }
 
 function blankCard(input: Partial<Card> & { name: string }, id?: string): Card {
@@ -174,11 +183,140 @@ function seedStore(): Store {
     cards.push(card)
   }
 
+  const companies = structuredClone(fixtures.gradingCompanies) as GradingCompany[]
+  const settings = structuredClone(fixtures.settings.values) as Record<string, unknown>
+  const { sales, listings } = seedSales(cards, companies)
+
+  const seeded: Store = { cards, conditions, companies, settings, sales, prices: [], listings }
+  const params = market.paramsFromSettings(settings)
+  const money = (settings.currency as string) ?? 'GBP'
+  for (const key of new Set(sales.map((sale) => sale.catalog_key))) {
+    market.markOutliers(
+      sales.filter((sale) => sale.catalog_key === key),
+      params,
+    )
+    market.recompute(key, sales, seeded.prices, params, money)
+  }
+  return seeded
+}
+
+/**
+ * Turn the seed's described series into dated sales.
+ *
+ * Deterministic: the same card always produces the same prices, so the demo
+ * looks identical on every load while still being dated relative to today.
+ */
+function seedSales(
+  cards: Card[],
+  companies: GradingCompany[],
+): { sales: MarketSale[]; listings: Map<string, number> } {
+  const sales: MarketSale[] = []
+  const listings = new Map<string, number>()
+  const today = Date.now()
+  const dayOf = (daysAgo: number) =>
+    new Date(today - daysAgo * 86_400_000).toISOString().slice(0, 10)
+
+  // A tiny deterministic hash, so "jitter" is stable across reloads.
+  const wobble = (seed: string, index: number, amount: number) => {
+    if (!amount) return 0
+    let hash = 2166136261
+    for (const char of `${seed}:${index}`) {
+      hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
+    }
+    return (((hash >>> 0) % 2001) / 1000 - 1) * amount
+  }
+
+  for (const card of cards) {
+    const spec = SEED_MARKET[card.name]
+    if (!spec || !card.catalog_key) continue
+    if (spec.activeListings) listings.set(card.catalog_key, spec.activeListings)
+
+    for (const series of spec.series) {
+      const [code, gradeText] = series.label === 'raw' ? [null, null] : series.label.split(' ')
+      const company = code ? companies.find((item) => item.code === code) : undefined
+      for (let index = 0; index < series.count; index += 1) {
+        const price =
+          series.price + index * (series.drift ?? 0) + wobble(card.id + series.label, index, series.jitter ?? 0)
+        sales.push(
+          makeSale(card, {
+            id: `${card.id}-${series.label}-${index}`.replace(/[^a-zA-Z0-9-]/g, '-'),
+            sale_date: dayOf((series.offset ?? 0) + index * series.spacing),
+            sale_price: Math.max(1, Math.round(price * 100) / 100),
+            grade_label: series.label,
+            grade: gradeText ? Number(gradeText) : null,
+            company_id: company?.id ?? null,
+            listing_title:
+              series.title ??
+              `${card.name} ${card.card_number ?? ''} ${card.variant ?? ''} ${
+                series.label === 'raw' ? '' : series.label
+              }`.trim(),
+          }),
+        )
+      }
+    }
+
+    for (const [index, junk] of (spec.junk ?? []).entries()) {
+      sales.push(
+        makeSale(card, {
+          id: `${card.id}-junk-${index}`,
+          sale_date: dayOf(junk.daysAgo),
+          sale_price: junk.price,
+          grade_label: 'raw',
+          grade: null,
+          company_id: null,
+          listing_title: junk.title,
+        }),
+      )
+    }
+  }
+
+  // Classify exactly as an import would, so the demo shows real exclusions.
+  for (const sale of sales) {
+    const card = cards.find((item) => item.catalog_key === sale.catalog_key)
+    const verdict = market.classify(
+      sale.listing_title,
+      { language: card?.language, variant: card?.variant, printing: card?.printing },
+      sale.lot_size,
+      sale.grade_label,
+    )
+    if (verdict) {
+      sale.is_excluded = true
+      sale.exclusion_reason = verdict.reason
+      sale.excluded_by = 'system'
+    }
+  }
+
+  return { sales, listings }
+}
+
+function makeSale(card: Card, input: Partial<MarketSale> & { id: string }): MarketSale {
   return {
-    cards,
-    conditions,
-    companies: structuredClone(fixtures.gradingCompanies) as GradingCompany[],
-    settings: structuredClone(fixtures.settings.values) as Record<string, unknown>,
+    catalog_key: card.catalog_key!,
+    card_id: card.id,
+    company_id: null,
+    grade: null,
+    grade_label: 'raw',
+    platform: 'eBay',
+    sale_date: nowIso().slice(0, 10),
+    sale_price: 0,
+    currency: 'GBP',
+    shipping: 3.95,
+    total_paid: null,
+    condition_note: null,
+    listing_title: null,
+    source_url: null,
+    seller: null,
+    bid_count: null,
+    lot_size: 1,
+    is_auction: null,
+    is_excluded: false,
+    exclusion_reason: null,
+    excluded_by: null,
+    is_outlier: false,
+    source_id: 'demo-manual',
+    external_id: input.id,
+    imported_at: nowIso(),
+    ...input,
   }
 }
 
@@ -198,8 +336,23 @@ function requireCard(id: string): Card {
   return card!
 }
 
+function marketParams() {
+  return market.paramsFromSettings(store.settings)
+}
+
+function summaryFor(card: Card): MarketSummary {
+  return market.summarise(card.catalog_key, store.sales, store.prices, marketParams(), currency())
+}
+
+function repriceKey(catalogKey: string | null): MarketPrice[] {
+  if (!catalogKey) return []
+  const forKey = store.sales.filter((sale) => sale.catalog_key === catalogKey)
+  market.markOutliers(forKey, marketParams())
+  return market.recompute(catalogKey, store.sales, store.prices, marketParams(), currency())
+}
+
 function evaluationFor(card: Card): CardEvaluation {
-  return buildEvaluation(card, store.conditions.get(card.id), store.companies, currency(), 0)
+  return buildEvaluation(card, store.conditions.get(card.id), store.companies, currency(), summaryFor(card))
 }
 
 const SORTERS: Record<string, (a: Card, b: Card) => number> = {
@@ -309,7 +462,8 @@ function refreshPrimaryImage(card: Card): void {
 type Handler = () => unknown
 
 /** Matches the server's routes. Returns the same JSON the API would. */
-function route(method: string, pathname: string, params: URLSearchParams, body: unknown): unknown {
+function route(method: string, pathname: string, params: URLSearchParams, raw: unknown): unknown {
+  const body = (raw ?? {}) as Record<string, unknown>
   const segments = pathname.split('/').filter(Boolean)
   const at = (index: number) => segments[index]
   const payload = (body ?? {}) as Record<string, never>
@@ -327,7 +481,7 @@ function route(method: string, pathname: string, params: URLSearchParams, body: 
         cards: store.cards.length,
         grading_companies: store.companies.length,
         market_sales: 0,
-        phase: '1 — foundation (demo)',
+        phase: '3 — market data (demo)',
       }),
     ],
     [method === 'GET' && pathname === '/meta/enums', () => fixtures.enums],
@@ -396,7 +550,15 @@ function route(method: string, pathname: string, params: URLSearchParams, body: 
     [method === 'GET' && pathname === '/collection/facets', () => facets()],
     [
       method === 'GET' && pathname === '/collection/summary',
-      () => buildSummary(store.cards, store.conditions, store.companies, currency()),
+      () =>
+        buildSummary(
+          store.cards,
+          store.conditions,
+          store.companies,
+          currency(),
+          store.prices,
+          store.sales.filter((sale) => !sale.is_excluded).length,
+        ),
     ],
     [method === 'GET' && pathname === '/cards', () => listCards(params)],
     [
@@ -452,6 +614,86 @@ function route(method: string, pathname: string, params: URLSearchParams, body: 
       method === 'GET' && at(0) === 'cards' && at(2) === 'evaluation',
       () => evaluationFor(requireCard(at(1))),
     ],
+
+    // --- Market ------------------------------------------------------------
+    [
+      method === 'GET' && at(0) === 'cards' && at(2) === 'market' && segments.length === 3,
+      () => summaryFor(requireCard(at(1))),
+    ],
+    [
+      method === 'POST' && at(0) === 'cards' && at(2) === 'market' && at(3) === 'recompute',
+      () => {
+        const card = requireCard(at(1))
+        repriceKey(card.catalog_key)
+        return summaryFor(card)
+      },
+    ],
+    [
+      method === 'GET' && at(0) === 'cards' && at(2) === 'market' && at(3) === 'sales',
+      () => {
+        const card = requireCard(at(1))
+        const includeExcluded = params.get('include_excluded') !== 'false'
+        return store.sales
+          .filter((sale) => sale.catalog_key === card.catalog_key)
+          .filter((sale) => includeExcluded || !sale.is_excluded)
+          .sort((a, b) => b.sale_date.localeCompare(a.sale_date))
+      },
+    ],
+    [
+      method === 'POST' && at(0) === 'cards' && at(2) === 'market' && at(3) === 'sales',
+      () => createSale(requireCard(at(1)), body),
+    ],
+    [
+      method === 'POST' &&
+        at(0) === 'cards' &&
+        at(2) === 'market' &&
+        at(3) === 'sales' &&
+        at(4) === 'import',
+      () => importSales(requireCard(at(1)), body),
+    ],
+    [
+      method === 'GET' && at(0) === 'cards' && at(2) === 'market' && at(3) === 'history',
+      // The demo store is rebuilt on every load, so there is no history to
+      // show. Saying so beats an empty chart that looks like a flat market.
+      () => [],
+    ],
+    [
+      method === 'GET' && at(0) === 'cards' && at(2) === 'market' && at(3) === 'listings',
+      () => [],
+    ],
+    [
+      method === 'POST' && at(0) === 'cards' && at(2) === 'market' && at(3) === 'reclassify',
+      () => reclassify(requireCard(at(1))),
+    ],
+    [
+      method === 'PUT' && at(0) === 'market' && at(1) === 'sales' && at(3) === 'exclusion',
+      () => setExclusion(at(2), body),
+    ],
+    [
+      method === 'DELETE' && at(0) === 'market' && at(1) === 'sales' && segments.length === 3,
+      () => {
+        const index = store.sales.findIndex((sale) => sale.id === at(2))
+        if (index < 0) fail('not_found', `Sale '${at(2)}' was not found.`, 404)
+        const [removed] = store.sales.splice(index, 1)
+        repriceKey(removed.catalog_key)
+        return null
+      },
+    ],
+    [
+      method === 'PUT' && at(0) === 'market' && at(1) === 'prices' && at(3) === 'override',
+      () => {
+        const price = store.prices.find((row) => row.id === at(2))
+        if (!price) fail('not_found', `Market price '${at(2)}' was not found.`, 404)
+        price!.user_value = (body.value as number | null) ?? null
+        price!.user_value_note = (body.note as string | null) ?? null
+        return price
+      },
+    ],
+    [
+      method === 'GET' && pathname === '/market/prices',
+      () =>
+        store.prices.filter((price) => price.catalog_key === params.get('catalog_key')),
+    ],
     [
       method === 'GET' && at(0) === 'cards' && at(2) === 'images',
       () => requireCard(at(1)).images,
@@ -490,6 +732,185 @@ function route(method: string, pathname: string, params: URLSearchParams, body: 
   }
 
   return fail('not_found', `No API route matches ${pathname} in the demo.`, 404)
+}
+
+// --- Market ------------------------------------------------------------------
+
+function saleContext(card: Card) {
+  return { language: card.language, variant: card.variant, printing: card.printing }
+}
+
+function createSale(card: Card, body: Record<string, unknown>): MarketSale {
+  if (!card.catalog_key) {
+    fail('no_catalog_key', 'This card has no catalog key, so its sales cannot be matched.')
+  }
+  const companyId = (body.company_id as string | null) ?? null
+  const grade = body.grade === null || body.grade === undefined ? null : Number(body.grade)
+  const company = companyId ? store.companies.find((item) => item.id === companyId) : undefined
+  if (companyId && grade === null) {
+    fail(
+      'missing_grade',
+      'A grading company was given without a grade. A slab is a company and a number; either ' +
+        'send both or send neither for a raw sale.',
+    )
+  }
+  const label = company ? market.gradeLabel(company.code, grade) : 'raw'
+
+  const sale = makeSale(card, {
+    id: newId(),
+    company_id: company?.id ?? null,
+    grade: company ? grade : null,
+    grade_label: label,
+    platform: (body.platform as string) ?? null,
+    sale_date: (body.sale_date as string) ?? nowIso().slice(0, 10),
+    sale_price: Number(body.sale_price ?? 0),
+    currency: (body.currency as string) ?? currency(),
+    shipping: (body.shipping as number | null) ?? null,
+    listing_title: (body.listing_title as string) ?? null,
+    source_url: (body.source_url as string) ?? null,
+    seller: (body.seller as string) ?? null,
+    lot_size: Number(body.lot_size ?? 1),
+    condition_note: (body.condition_note as string) ?? null,
+    external_id: null,
+  })
+
+  if (body.apply_filters !== false) {
+    const verdict = market.classify(sale.listing_title, saleContext(card), sale.lot_size, label)
+    if (verdict) {
+      sale.is_excluded = true
+      sale.exclusion_reason = verdict.reason
+      sale.excluded_by = 'system'
+    }
+  }
+
+  store.sales.push(sale)
+  repriceKey(card.catalog_key)
+  return sale
+}
+
+function importSales(card: Card, body: Record<string, unknown>): ImportResult {
+  if (!card.catalog_key) {
+    fail('no_catalog_key', 'This card has no catalog key, so its sales cannot be matched.')
+  }
+  const parsed = market.parseCsv(String(body.csv ?? ''), body.day_first !== false)
+  const applyFilters = body.apply_filters !== false
+  const result = market.blankImportResult()
+  result.errors = parsed.errors
+
+  for (const row of parsed.rows) {
+    // Deduplicated on external id, exactly as the server does on
+    // (source_id, external_id): re-importing an overlapping export updates.
+    const existing = row.externalId
+      ? store.sales.find(
+          (sale) => sale.external_id === row.externalId && sale.source_id === 'demo-csv',
+        )
+      : undefined
+
+    let code = row.companyCode
+    let grade = row.grade
+    if (!(code && grade !== null)) {
+      const fromTitle = market.parseGradeFromTitle(row.listingTitle)
+      if (fromTitle) [code, grade] = fromTitle
+    }
+    const company = code ? store.companies.find((item) => item.code === code) : undefined
+    const label = company && grade !== null ? market.gradeLabel(company.code, grade) : 'raw'
+
+    const sale =
+      existing ??
+      makeSale(card, { id: newId(), external_id: row.externalId, source_id: 'demo-csv' })
+    Object.assign(sale, {
+      catalog_key: card.catalog_key,
+      company_id: company?.id ?? null,
+      grade: company ? grade : null,
+      grade_label: label,
+      platform: row.platform,
+      sale_date: row.saleDate,
+      sale_price: market.toMajor(row.salePriceMinor)!,
+      currency: row.currency ?? currency(),
+      shipping: market.toMajor(row.shippingMinor),
+      listing_title: row.listingTitle,
+      source_url: row.sourceUrl,
+      seller: row.seller,
+      lot_size: row.lotSize,
+      condition_note: row.conditionNote,
+      source_id: 'demo-csv',
+      external_id: row.externalId,
+    })
+
+    // A user's decision is a decision: re-importing must not overwrite it.
+    if (applyFilters && sale.excluded_by !== 'user') {
+      const verdict = market.classify(sale.listing_title, saleContext(card), sale.lot_size, label)
+      if (verdict) {
+        sale.is_excluded = true
+        sale.exclusion_reason = verdict.reason
+        sale.excluded_by = 'system'
+        result.excluded += 1
+        result.exclusions[verdict.reason] = (result.exclusions[verdict.reason] ?? 0) + 1
+      } else {
+        sale.is_excluded = false
+        sale.exclusion_reason = null
+        sale.excluded_by = null
+      }
+    }
+
+    if (existing) result.updated += 1
+    else {
+      store.sales.push(sale)
+      result.imported += 1
+    }
+  }
+
+  const before = store.sales.filter((sale) => sale.is_outlier).length
+  result.prices = repriceKey(card.catalog_key)
+  result.outliers_flagged = Math.max(
+    0,
+    store.sales.filter((sale) => sale.is_outlier).length - before,
+  )
+  return result
+}
+
+function setExclusion(saleId: string, body: Record<string, unknown>): MarketSale {
+  const sale = store.sales.find((item) => item.id === saleId)
+  if (!sale) fail('not_found', `Sale '${saleId}' was not found.`, 404)
+  sale!.is_excluded = Boolean(body.excluded)
+  sale!.excluded_by = 'user'
+  if (sale!.is_excluded) {
+    sale!.exclusion_reason = (body.reason as MarketSale['exclusion_reason']) ?? 'user_excluded'
+  } else {
+    sale!.exclusion_reason = null
+    sale!.is_outlier = false
+  }
+  repriceKey(sale!.catalog_key)
+  return sale!
+}
+
+function reclassify(card: Card): Record<string, number> {
+  const counts = { kept: 0, excluded: 0, unchanged: 0, skipped_user: 0, outliers_flagged: 0, outliers_cleared: 0 }
+  for (const sale of store.sales.filter((item) => item.catalog_key === card.catalog_key)) {
+    if (sale.excluded_by === 'user') {
+      counts.skipped_user += 1
+      continue
+    }
+    const was = sale.is_excluded
+    if (sale.exclusion_reason === 'price_outlier') {
+      counts.unchanged += 1
+      continue
+    }
+    const verdict = market.classify(
+      sale.listing_title,
+      saleContext(card),
+      sale.lot_size,
+      sale.grade_label,
+    )
+    sale.is_excluded = Boolean(verdict)
+    sale.exclusion_reason = verdict?.reason ?? null
+    sale.excluded_by = verdict ? 'system' : null
+    if (sale.is_excluded === was) counts.unchanged += 1
+    else if (sale.is_excluded) counts.excluded += 1
+    else counts.kept += 1
+  }
+  repriceKey(card.catalog_key)
+  return counts
 }
 
 // --- Images ------------------------------------------------------------------

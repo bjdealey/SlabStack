@@ -228,3 +228,111 @@ export const SEED_CARDS: SeedCard[] = [
     },
   },
 ]
+
+/* --- Comparable sales ----------------------------------------------------- */
+
+/**
+ * Sales histories for the demo, described rather than listed.
+ *
+ * Dates are generated relative to the day the demo is opened, so the sample
+ * never goes stale and the recency weighting, liquidity score and trend all
+ * have something real to work on. The junk entries are deliberate: the demo
+ * should show the exclusion filters catching a job lot and a Japanese print,
+ * because that is the part of the import that is easy to get wrong.
+ */
+export interface SaleSeries {
+  /** `raw`, or a slab label such as `PSA 10`. */
+  label: string
+  count: number
+  /** Price of the most recent sale, in major units. */
+  price: number
+  /** Days between sales. */
+  spacing: number
+  /**
+   * Days back to the most recent sale in this series. Without it every series
+   * would start today, and a card meant to look illiquid would show a sale in
+   * the last week.
+   */
+  offset?: number
+  /** Added per step back in time — negative means prices have been rising. */
+  drift?: number
+  /** Random-looking but deterministic wobble, ± this many major units. */
+  jitter?: number
+  title?: string
+}
+
+export interface SeedJunk {
+  daysAgo: number
+  price: number
+  title: string
+}
+
+export interface SeedMarket {
+  series: SaleSeries[]
+  junk?: SeedJunk[]
+  /** Active unsold listings, which drag the liquidity score down. */
+  activeListings?: number
+}
+
+/** Keyed by card name. Cards missing from this map have no sales — also a state worth showing. */
+export const SEED_MARKET: Record<string, SeedMarket> = {
+  'Umbreon VMAX': {
+    series: [
+      { label: 'raw', count: 24, price: 212, spacing: 4, drift: -1.4, jitter: 7 },
+      { label: 'PSA 10', count: 14, price: 905, spacing: 7, offset: 2, drift: -8, jitter: 30 },
+      { label: 'PSA 9', count: 9, price: 372, spacing: 11, offset: 3, drift: -2, jitter: 14 },
+      { label: 'CGC 9.5', count: 5, price: 430, spacing: 19, offset: 6, drift: -3, jitter: 18 },
+    ],
+    junk: [
+      { daysAgo: 9, price: 640, title: 'Pokemon Job Lot 60 Cards Bundle Evolving Skies' },
+      { daysAgo: 15, price: 96, title: 'Japanese Umbreon VMAX Alt Art 095/069' },
+      { daysAgo: 22, price: 78, title: 'Umbreon VMAX Alt Art heavily played creased' },
+      { daysAgo: 5, price: 1450, title: 'Umbreon VMAX Alt Art 215/203 Evolving Skies' },
+    ],
+    activeListings: 11,
+  },
+  'Charizard ex': {
+    series: [
+      { label: 'raw', count: 17, price: 96, spacing: 5, drift: 0.5, jitter: 5 },
+      { label: 'PSA 10', count: 8, price: 305, spacing: 12, offset: 5, drift: 4, jitter: 16 },
+    ],
+    junk: [{ daysAgo: 11, price: 240, title: 'Charizard ex 199/165 x10 bulk lot' }],
+    activeListings: 24,
+  },
+  'Giratina VSTAR': {
+    // Thin and slow: the state where a confident number would be a lie.
+    series: [{ label: 'raw', count: 4, price: 118, spacing: 47, offset: 38, drift: 3, jitter: 6 }],
+    activeListings: 9,
+  },
+  'Gengar VMAX': {
+    series: [
+      { label: 'raw', count: 12, price: 148, spacing: 8, drift: 2.4, jitter: 6 },
+      { label: 'CGC 9.5', count: 6, price: 296, spacing: 16, offset: 4, drift: 6, jitter: 12 },
+    ],
+    activeListings: 6,
+  },
+  'Lugia V': {
+    series: [{ label: 'raw', count: 9, price: 74, spacing: 9, drift: -0.8, jitter: 4 }],
+    activeListings: 3,
+  },
+  Charizard: {
+    // Base Set: rare, expensive, and it barely trades.
+    series: [
+      { label: 'raw', count: 3, price: 1180, spacing: 96, offset: 74, drift: -60, jitter: 40 },
+      { label: 'PSA 9', count: 2, price: 5400, spacing: 150, offset: 121, drift: -300, jitter: 0 },
+    ],
+    junk: [{ daysAgo: 30, price: 42, title: 'Charizard Base Set custom metal card replica' }],
+    activeListings: 2,
+  },
+  Iono: {
+    series: [{ label: 'raw', count: 15, price: 124, spacing: 6, drift: 1.1, jitter: 5 }],
+    activeListings: 14,
+  },
+  'Pikachu with Grey Felt Hat': {
+    series: [
+      { label: 'raw', count: 11, price: 402, spacing: 9, drift: -5, jitter: 18 },
+      { label: 'PSA 10', count: 4, price: 1290, spacing: 26, offset: 12, drift: -40, jitter: 60 },
+    ],
+    activeListings: 7,
+  },
+}

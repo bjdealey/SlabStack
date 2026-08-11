@@ -12,7 +12,7 @@ no outbound network call in this build.
 
 ---
 
-## Status: Phases 1–2
+## Status: Phases 1–3
 
 | Delivered                                                                     |
 | ----------------------------------------------------------------------------- |
@@ -22,10 +22,16 @@ no outbound network call in this build.
 | Front/back image upload with content validation and thumbnails                |
 | Structured condition assessment (16 defects × 2 faces + centering) with derived sub-scores |
 | **Grade probability model** — a distribution per grading company, with configurable defect rules |
+| **Sales import** — manual and CSV, deduplicated, with reversible exclusion filtering |
+| **Valuation, liquidity and trend** — every number carrying its own evidence   |
 | Configuration-driven grading companies, tiers, memberships and selling profiles |
 | `evaluate_card` — the decision envelope the whole UI renders                  |
-| React dashboard, collection view, card detail page and settings               |
-| 200 backend tests, contract guards, clean lint, verified end-to-end in a browser |
+| React dashboard, collection view, card detail page, market panel and settings |
+| 289 backend tests, contract guards, clean lint, verified end-to-end in a browser |
+
+Market data comes from sales you enter or import. Network provider adapters are **not** built:
+they need API credentials and each service's terms reviewed, so `POST /api/market/refresh` is the
+one market endpoint still returning a `501` — and it says what does work without it.
 
 Blocks that need later engines report `not_implemented` or `insufficient_data` with the phase that
 delivers them and a reason you can act on. **Nothing returns an invented number.** See
@@ -194,9 +200,9 @@ One call returns everything needed to decide, and the UI only visualises it:
   "raw": { … },               // identity, ownership, the raw value in use
   "condition": { … },         // sub-scores, completeness, notable defects
   "grade_prediction": { … },  // a distribution per grading company
-  "market": { … },            // Phase 3
-  "liquidity": { … },         // Phase 3
-  "trend": { … },             // Phase 3
+  "market": { … },            // raw + graded values, with sample size and confidence
+  "liquidity": { … },         // score, band and sale counts, across every grade
+  "trend": { … },             // direction per horizon, within one grade
   "grading_options": { … },   // routes now, full costing in Phase 4
   "expected_outcomes": { … }, // Phase 5
   "recommendation": { … },    // Phase 5 (your overrides work today)
@@ -223,6 +229,13 @@ from an assessment with nothing answered, and never treats an unanswered field a
 half-finished assessment produces a wide range and says so. Its defect rules are SlabStack's
 estimates, not any grader's published standard, which is why they are editable rows.
 
+**No blended markets.** Language, variant and printing are part of a card's identity, so a
+Japanese copy's sales never reach an English alt art's median. The import filters catch job lots,
+damage, customs, wrong printings and best-offer sales, and an IQR fence catches absurd prices —
+but only once there are enough sales to draw one, because a fence drawn by five points is drawn by
+the points it is meant to judge. **Nothing is deleted:** every exclusion keeps its row, its reason
+and who made it, and is one click from being reversed.
+
 **No invented prices.** Grading tiers are seeded `active` only where the price can be attributed —
 CGC and ACE from the figures in the specification, flagged for you to verify. PSA ships as tier
 structure with no price and `active: false`, so the engine skips it until you enter your own. An
@@ -243,8 +256,9 @@ unpriced tier left active would cost a submission at £0 and make everything loo
 
 ## Data and third parties
 
-Your collection never leaves your machine. When market-data providers arrive in Phase 3 they will
-use official, permitted APIs under each service's terms — a source that requires scraping a site
-that forbids it does not belong in this application. Every network provider ships disabled;
-`manual` and `csv` import work with no network, no key and no terms of service, and are what the
+Your collection never leaves your machine, and this build makes no outbound network call at all.
+Market data comes from sales you type in or import from a CSV — no network, no key, no terms of
+service. When network providers are added they will use official, permitted APIs under each
+service's terms; a source that requires scraping a site that forbids it does not belong in this
+application. Every network provider ships disabled, and `manual` and `csv` import are what the
 application degrades to.
