@@ -492,7 +492,7 @@ function predictGrade(
   }
 }
 
-function buildGradePrediction(
+export function buildGradePrediction(
   assessment: ConditionAssessment | undefined,
   companies: GradingCompany[],
 ): CardEvaluation['grade_prediction'] {
@@ -847,6 +847,7 @@ function buildOptionsBlock(input: {
   options: GradingOption[]
   currency: string
   declared: DeclaredValue
+  headlineCode?: string | null
   assumptions: SubmissionAssumptions
   profile: SellingProfile | null
   netRows: NetValueRow[]
@@ -898,7 +899,12 @@ function buildOptionsBlock(input: {
     declared_value: toMajor(declared.valueMinor),
     declared_value_source: declared.source,
     declared_value_confidence: declared.confidence,
-    declared_value_basis: declared.basis,
+    // Named, because declared values now differ per grader and a headline that
+    // floats free would contradict the rows beneath it.
+    declared_value_basis:
+      input.headlineCode && declared.source !== 'user'
+        ? `Valued against ${input.headlineCode}'s ladder. ${declared.basis ?? ''}`.trim()
+        : declared.basis,
     declared_value_coverage: declared.coverage,
     assumed_batch_size: assumptions.batchSize,
     allocation_method: assumptions.allocationMethod,
@@ -908,6 +914,35 @@ function buildOptionsBlock(input: {
     net_values: netRows,
     cheapest_available_cost: input.cheapestCost,
   }
+}
+
+
+/**
+ * What this card would be declared at when sent to one particular grader.
+ *
+ * Weighted by that grader's own ladder and priced from its own slabs. Your own
+ * figure overrides it everywhere, as it does throughout.
+ */
+function declaredForCompany(
+  card: Card,
+  gradeBlock: CardEvaluation['grade_prediction'],
+  prices: MarketPrice[],
+  companyCode: string | null,
+): DeclaredValue {
+  if (card.user_declared_value !== null) {
+    return {
+      valueMinor: toMinor(card.user_declared_value),
+      source: 'user',
+      confidence: 'high',
+      coverage: null,
+      basis: "Your own figure. The engine's suggestion is kept alongside it, not replaced.",
+    }
+  }
+  const forCompany = gradeBlock.by_company.find((item) => item.company_code === companyCode)
+  const probabilities = forCompany?.probabilities.length
+    ? Object.fromEntries(forCompany.probabilities.map((item) => [item.grade, item.probability]))
+    : null
+  return suggestDeclaredValue(card, prices, probabilities, companyCode)
 }
 
 
@@ -1345,29 +1380,29 @@ export function buildEvaluation(
   const today = new Date().toISOString().slice(0, 10)
   const gradeBlock = buildGradePrediction(assessment, companies)
 
-  // Value the declared figure against the headline grader's own ladder and
-  // prices — the same company, or the number describes a card that does not
-  // exist.
-  const headline = gradeBlock.by_company[0]
-  const probabilities = headline?.probabilities.length
-    ? Object.fromEntries(headline.probabilities.map((item) => [item.grade, item.probability]))
-    : null
-  let declared = suggestDeclaredValue(card, market.prices, probabilities, headline?.company_code ?? null)
-  if (card.user_declared_value !== null) {
-    declared = {
-      valueMinor: toMinor(card.user_declared_value),
-      source: 'user',
-      confidence: 'high',
-      coverage: null,
-      basis: "Your own figure. The engine's suggestion is kept alongside it, not replaced.",
-    }
-  }
+  // A declared value is a statement about the slab you will own, so it is
+  // computed per grader — against that grader's own ladder and its own slab
+  // prices. Valuing every company's tiers against one headline grader let a
+  // card slip under a ceiling it exceeded: with no sales stored for the
+  // headline company the figure falls back to the raw value, and a card whose
+  // CGC slabs are worth far more passed a CGC tier's cap.
+  const declaredFor = (companyCode: string | null) =>
+    declaredForCompany(card, gradeBlock, market.prices, companyCode)
+
+  // The headline figure the panel shows, quoted against a named grader rather
+  // than floating free and contradicting the rows beneath it.
+  const active = companies.filter((company) => company.active)
+  const headlineCode = active[0]?.code ?? gradeBlock.by_company[0]?.company_code ?? null
+  const declared = declaredFor(headlineCode)
 
   // Costing is re-runnable at a different batch on purpose: shipping belongs to
   // the parcel, not the card, so "worth grading in a submission of 20" needs the
   // same arithmetic done twice rather than a guess at what a batch would save.
   const costAt = (size: number) =>
-    buildGradingOptions({ card, companies, currency, market, settings, profile, declared, today, batchSize: size })
+    buildGradingOptions({
+      card, companies, currency, market, settings, profile, declared,
+      declaredFor, headlineCode, today, batchSize: size,
+    })
 
   const optionsBlock = costAt(batchSize)
   const options = optionsBlock.options
@@ -1401,6 +1436,8 @@ function buildGradingOptions(input: {
   settings: Record<string, unknown>
   profile: SellingProfile | null
   declared: DeclaredValue
+  declaredFor: (companyCode: string | null) => DeclaredValue
+  headlineCode: string | null
   today: string
   batchSize: number
 }): GradingOptionsBlock {
@@ -1409,7 +1446,9 @@ function buildGradingOptions(input: {
   const options: GradingOption[] = []
 
   for (const company of companies.filter((c) => c.active)) {
-    const tiers = eligibleTiers(company, declared.valueMinor, assumptions.batchSize, today)
+    // This company's own number, not the headline grader's.
+    const declaredHere = input.declaredFor(company.code)
+    const tiers = eligibleTiers(company, declaredHere.valueMinor, assumptions.batchSize, today)
     if (!tiers.length) {
       options.push({
         company_id: company.id,
@@ -1418,7 +1457,7 @@ function buildGradingOptions(input: {
         tier_id: null,
         tier_name: null,
         currency: company.currency,
-        declared_value: toMajor(declared.valueMinor),
+        declared_value: toMajor(declaredHere.valueMinor),
         base_fee: null,
         membership_discount: null,
         grading_fee: null,
@@ -1442,7 +1481,7 @@ function buildGradingOptions(input: {
     }
 
     for (const { tier, blockers } of tiers) {
-      const cost = costForTier(tier, company, declared.valueMinor, assumptions, today)
+      const cost = costForTier(tier, company, declaredHere.valueMinor, assumptions, today)
       const priced = tier.price > 0
       options.push({
         company_id: company.id,
@@ -1451,7 +1490,7 @@ function buildGradingOptions(input: {
         tier_id: tier.id,
         tier_name: tier.tier_name,
         currency: tier.currency,
-        declared_value: toMajor(declared.valueMinor),
+        declared_value: toMajor(declaredHere.valueMinor),
         base_fee: priced ? toMajor(cost.baseFeeMinor) : null,
         membership_discount: toMajor(cost.membershipDiscountMinor) || null,
         grading_fee: priced ? toMajor(cost.gradingFeeMinor) : null,
@@ -1500,6 +1539,7 @@ function buildGradingOptions(input: {
     options,
     currency,
     declared,
+    headlineCode: input.headlineCode,
     assumptions,
     profile,
     netRows,

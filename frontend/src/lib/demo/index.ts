@@ -34,9 +34,14 @@ import {
   buildAssessment,
   buildCatalogKey,
   buildEvaluation,
+  buildGradePrediction,
   buildSummary,
 } from './engine'
+import { suggestDeclaredValue } from './economics'
 import * as market from './market'
+import { optimise } from './optimiser'
+import type { StoredLine, StoredSubmission } from './submissions'
+import { costSubmission, nextReference } from './submissions'
 import { SEED_CARDS, SEED_MARKET } from './seed'
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO === 'true'
@@ -76,6 +81,7 @@ interface Store {
   sales: MarketSale[]
   prices: MarketPrice[]
   listings: Map<string, number>
+  submissions: StoredSubmission[]
 }
 
 function blankCard(input: Partial<Card> & { name: string }, id?: string): Card {
@@ -190,7 +196,9 @@ function seedStore(): Store {
   const settings = structuredClone(fixtures.settings.values) as Record<string, unknown>
   const { sales, listings } = seedSales(cards, companies)
 
-  const seeded: Store = { cards, conditions, companies, settings, sales, prices: [], listings }
+  const seeded: Store = {
+    cards, conditions, companies, settings, sales, prices: [], listings, submissions: [],
+  }
   const params = market.paramsFromSettings(settings)
   const money = (settings.currency as string) ?? 'GBP'
   for (const key of new Set(sales.map((sale) => sale.catalog_key))) {
@@ -488,6 +496,81 @@ function collectionDecisions(batchSize: number): CollectionDecisions {
   return result
 }
 
+
+/* --- Submissions ---------------------------------------------------------- */
+
+const SEALED = new Set(['shipped', 'received', 'grading', 'returned', 'cancelled'])
+
+function cardMap(): Map<string, Card> {
+  return new Map(store.cards.map((card) => [card.id, card]))
+}
+
+/**
+ * The declared value for one card against one grader.
+ *
+ * Computed straight from that grader's ladder and prices rather than by running
+ * a whole evaluation: costing a parcel touches every card, and a full
+ * evaluation per line would make the cost of opening a submission grow with
+ * the square of its size.
+ */
+function declaredValueFor(card: Card, companyCode: string | null): number | null {
+  if (card.user_declared_value !== null) return market.toMinor(card.user_declared_value)
+  const company = store.companies.find((item) => item.code === companyCode) ?? null
+  const prediction = company
+    ? buildGradePrediction(store.conditions.get(card.id), [company]).by_company[0]
+    : null
+  const probabilities = prediction?.probabilities.length
+    ? Object.fromEntries(prediction.probabilities.map((item) => [item.grade, item.probability]))
+    : null
+  const prices = store.prices.filter((price) => price.catalog_key === card.catalog_key)
+  return suggestDeclaredValue(card, prices, probabilities, companyCode ?? null).valueMinor
+}
+
+function costed(submission: StoredSubmission) {
+  return costSubmission({
+    submission,
+    cards: cardMap(),
+    companies: store.companies,
+    declaredFor: declaredValueFor,
+    insurancePct: Number(store.settings.default_submission_insurance_pct ?? 0) || 0,
+    today: new Date().toISOString().slice(0, 10),
+  })
+}
+
+function requireSubmission(id: string): StoredSubmission {
+  const found = store.submissions.find((item) => item.id === id)
+  if (!found) fail('not_found', `Submission '${id}' was not found.`, 404)
+  return found!
+}
+
+function requireEditable(submission: StoredSubmission): void {
+  if (SEALED.has(submission.status)) {
+    fail(
+      'conflict',
+      `This submission is ${submission.status.replace(/_/g, ' ')}, so its cards can no longer ` +
+        'be changed. What you sent is a record, not a draft.',
+      409,
+      { status: submission.status },
+    )
+  }
+}
+
+function newLine(cardId: string, tierId: string | null, order: number): StoredLine {
+  return {
+    id: newId(),
+    card_id: cardId,
+    tier_id: tierId,
+    declared_value_minor: null,
+    declared_value_source: 'system',
+    declared_value_confidence: null,
+    actual_grade: null,
+    cert_number: null,
+    status: 'planned',
+    sort_order: order,
+    notes: null,
+  }
+}
+
 const SORTERS: Record<string, (a: Card, b: Card) => number> = {
   created_at: (a, b) => a.created_at.localeCompare(b.created_at),
   updated_at: (a, b) => a.updated_at.localeCompare(b.updated_at),
@@ -678,6 +761,209 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
           }
         }
         return fail('not_found', `Grading tier '${at(2)}' was not found.`, 404)
+      },
+    ],
+    [
+      method === 'GET' && pathname === '/submissions',
+      () =>
+        [...store.submissions]
+          .sort((a, b) => b.created_at.localeCompare(a.created_at))
+          .map(costed),
+    ],
+    [
+      method === 'POST' && pathname === '/submissions',
+      () => {
+        const body = payload as Record<string, unknown>
+        const companyId = String(body.company_id ?? '')
+        if (!store.companies.some((company) => company.id === companyId)) {
+          fail('not_found', `Grading company '${companyId}' was not found.`, 404)
+        }
+        const submission: StoredSubmission = {
+          id: newId(),
+          reference: nextReference(
+            store.submissions.map((item) => item.reference),
+            new Date().toISOString().slice(0, 10),
+          ),
+          name: (body.name as string) ?? null,
+          company_id: companyId,
+          tier_id: (body.tier_id as string) ?? null,
+          status: 'draft',
+          currency: (store.settings.currency as string) ?? 'GBP',
+          cost_allocation_method:
+            (body.cost_allocation_method as string) ??
+            (store.settings.cost_allocation_method as string) ??
+            'equal',
+          shipping_out_minor: market.toMinor(Number(body.shipping_out ?? 0)),
+          shipping_return_minor: market.toMinor(Number(body.shipping_return ?? 0)),
+          handling_minor: market.toMinor(Number(body.handling ?? 0)),
+          other_fees_minor: market.toMinor(Number(body.other_fees ?? 0)),
+          membership_allocation_minor: 0,
+          submitted_at: null,
+          received_at: null,
+          returned_at: null,
+          tracking_outbound: null,
+          tracking_return: null,
+          notes: (body.notes as string) ?? null,
+          created_at: nowIso(),
+          cards: [],
+        }
+        const ids = (body.card_ids as string[]) ?? []
+        ids.forEach((cardId, index) => {
+          if (!store.cards.some((card) => card.id === cardId)) {
+            fail('not_found', `Card '${cardId}' was not found.`, 404)
+          }
+          submission.cards.push(newLine(cardId, submission.tier_id, index))
+        })
+        store.submissions.push(submission)
+        return costed(submission)
+      },
+    ],
+    [
+      method === 'POST' && at(0) === 'submissions' && at(1) === 'optimise',
+      () => {
+        const candidates = store.cards
+          .filter(
+            (card) =>
+              store.conditions.has(card.id) &&
+              store.prices.some((price) => price.catalog_key === card.catalog_key),
+          )
+          .map((card) => card.id)
+        const limit = Number(params.get('limit') ?? 150) || 150
+        return optimise({
+          candidates,
+          totalCards: store.cards.length,
+          companies: store.companies,
+          currency: currency(),
+          limit,
+          evaluate: (cardId, batchSize) => {
+            const card = store.cards.find((item) => item.id === cardId)!
+            return evaluationFor(card, batchSize)
+          },
+        })
+      },
+    ],
+    [
+      method === 'GET' && at(0) === 'submissions' && segments.length === 2,
+      () => costed(requireSubmission(at(1))),
+    ],
+    [
+      method === 'PATCH' && at(0) === 'submissions' && segments.length === 2,
+      () => {
+        const submission = requireSubmission(at(1))
+        const body = payload as Record<string, unknown>
+        const statuses = new Set([
+          'draft', 'planned', 'shipped', 'received', 'grading', 'returned', 'cancelled',
+        ])
+        if (body.status !== undefined && !statuses.has(String(body.status))) {
+          fail('conflict', `'${body.status}' is not a submission status.`, 409)
+        }
+        if (
+          body.cost_allocation_method !== undefined &&
+          !['equal', 'value_weighted', 'custom'].includes(String(body.cost_allocation_method))
+        ) {
+          fail(
+            'conflict',
+            `'${body.cost_allocation_method}' is not a cost allocation method.`,
+            409,
+          )
+        }
+        for (const [key, column] of [
+          ['shipping_out', 'shipping_out_minor'],
+          ['shipping_return', 'shipping_return_minor'],
+          ['handling', 'handling_minor'],
+          ['other_fees', 'other_fees_minor'],
+        ] as const) {
+          if (body[key] !== undefined) {
+            ;(submission as unknown as Record<string, unknown>)[column] = market.toMinor(
+              Number(body[key] ?? 0),
+            )
+          }
+        }
+        for (const key of [
+          'name', 'company_id', 'tier_id', 'status', 'cost_allocation_method',
+          'submitted_at', 'received_at', 'returned_at', 'tracking_outbound',
+          'tracking_return', 'notes',
+        ] as const) {
+          if (body[key] !== undefined) {
+            ;(submission as unknown as Record<string, unknown>)[key] = body[key]
+          }
+        }
+        return costed(submission)
+      },
+    ],
+    [
+      method === 'DELETE' && at(0) === 'submissions' && segments.length === 2,
+      () => {
+        const submission = requireSubmission(at(1))
+        if (!['draft', 'cancelled'].includes(submission.status)) {
+          fail(
+            'conflict',
+            'Only a draft or cancelled submission can be deleted. Cancel it instead, so the ' +
+              'record of what you sent survives.',
+            409,
+            { status: submission.status },
+          )
+        }
+        store.submissions = store.submissions.filter((item) => item.id !== submission.id)
+        // undefined, not null: the dispatcher turns that into a 204, matching
+        // the real API's empty response for a delete.
+        return undefined
+      },
+    ],
+    [
+      method === 'POST' && at(0) === 'submissions' && at(2) === 'cards',
+      () => {
+        const submission = requireSubmission(at(1))
+        requireEditable(submission)
+        const ids = ((payload as Record<string, unknown>).card_ids as string[]) ?? []
+        const tierId =
+          ((payload as Record<string, unknown>).tier_id as string) ?? submission.tier_id
+        const existing = new Set(submission.cards.map((line) => line.card_id))
+        let order = Math.max(-1, ...submission.cards.map((line) => line.sort_order)) + 1
+        for (const cardId of ids) {
+          if (!store.cards.some((card) => card.id === cardId)) {
+            fail('not_found', `Card '${cardId}' was not found.`, 404)
+          }
+          if (existing.has(cardId)) continue
+          submission.cards.push(newLine(cardId, tierId, order))
+          order += 1
+        }
+        return costed(submission)
+      },
+    ],
+    [
+      method === 'PATCH' && at(0) === 'submissions' && at(2) === 'cards',
+      () => {
+        const submission = requireSubmission(at(1))
+        const line = submission.cards.find((item) => item.id === at(3))
+        if (!line) fail('not_found', `Submission card '${at(3)}' was not found.`, 404)
+        const body = payload as Record<string, unknown>
+        if (body.declared_value !== undefined) {
+          line!.declared_value_minor =
+            body.declared_value === null ? null : market.toMinor(Number(body.declared_value))
+          line!.declared_value_source = 'user'
+          line!.declared_value_confidence = 'high'
+        }
+        for (const key of ['tier_id', 'actual_grade', 'cert_number', 'status', 'notes'] as const) {
+          if (body[key] !== undefined) {
+            ;(line as unknown as Record<string, unknown>)[key] = body[key]
+          }
+        }
+        if (body.sort_order !== undefined) line!.sort_order = Number(body.sort_order)
+        return costed(submission)
+      },
+    ],
+    [
+      method === 'DELETE' && at(0) === 'submissions' && at(2) === 'cards',
+      () => {
+        const submission = requireSubmission(at(1))
+        requireEditable(submission)
+        const before = submission.cards.length
+        submission.cards = submission.cards.filter((item) => item.id !== at(3))
+        if (submission.cards.length === before) {
+          fail('not_found', `Submission card '${at(3)}' was not found.`, 404)
+        }
+        return costed(submission)
       },
     ],
     [method === 'GET' && pathname === '/collection/facets', () => facets()],

@@ -771,16 +771,163 @@ survives re-imports and reclassification.
 
 ## Submissions and analytics
 
-| Method | Path                                | Status | Description                   |
-| ------ | ----------------------------------- | ------ | ----------------------------- |
-| GET    | `/api/submissions`                  | ⏳ P6  | Grading submissions.          |
-| POST   | `/api/submissions/optimise`         | ⏳ P6  | Batch the collection against tier minimums. |
-| GET    | `/api/analytics/opportunities`      | ⏳ P7  | Ranked grading opportunities. |
-| GET    | `/api/analytics/accuracy`           | ⏳ P8  | Predicted vs actual grades.   |
+| Method | Path                                            | Status | Description                   |
+| ------ | ----------------------------------------------- | ------ | ----------------------------- |
+| GET    | `/api/submissions`                              | ✅     | Every submission, fully costed. |
+| POST   | `/api/submissions`                              | ✅     | Start a parcel.               |
+| GET    | `/api/submissions/{id}`                         | ✅     | One submission, costed.       |
+| PATCH  | `/api/submissions/{id}`                         | ✅     | Rename, re-tier, set postage, move the lifecycle on. |
+| DELETE | `/api/submissions/{id}`                         | ✅     | Draft or cancelled only.      |
+| POST   | `/api/submissions/{id}/cards`                   | ✅     | Add cards.                    |
+| PATCH  | `/api/submissions/{id}/cards/{lineId}`          | ✅     | Declared value, tier, actual grade, cert number. |
+| DELETE | `/api/submissions/{id}/cards/{lineId}`          | ✅     | Remove a card.                |
+| POST   | `/api/submissions/optimise`                     | ✅     | Pack the collection into batches that still pay once packed. |
+| GET    | `/api/analytics/opportunities`                  | ⏳ P7  | Ranked grading opportunities. |
+| GET    | `/api/analytics/accuracy`                       | ⏳ P8  | Predicted vs actual grades.   |
 
-The tables behind these (`grading_submissions`, `submission_cards`, `prediction_results`,
-`price_snapshots`) exist now, and penny-exact shared-cost allocation is implemented and tested in
-`app.money.allocate`, so Phase 6 is a planner over data that is already modelled.
+### Costing a submission
+
+Every submission response is fully costed — the list included, because the cost of a parcel is the
+reason to open it. Three things differ from the single-card costing in `evaluate_card`:
+
+**Insurance comes from the real declared values.** Not one card's value multiplied by the batch.
+
+**Allocation can be value-weighted.** `cost_allocation_method` is `equal` or `value_weighted`;
+either way the shares sum back to `shared_pot` exactly. Value-weighted falls back to equal, with
+`allocation_note` saying so, when no card in the parcel has a declared value.
+
+**Tier minimums count cards at that tier**, not cards in the parcel. `tiers[]` groups the lines and
+reports `short_by` per tier; shipping is still shared across the whole parcel regardless of tier,
+which is what makes a mixed submission worth building.
+
+`cost_per_card` is an average, and `null` with no cards — never `0`.
+
+A submission that breaks a tier's rules is **still costed and still returned**, with every
+violation in `blockers`. You are allowed to build a parcel over several sittings.
+
+Once a submission is `shipped` or later, its cards are frozen: adding, removing or reordering
+returns `409`. What you sent is a record, and Phase 8 compares predicted grades against the
+`actual_grade` recorded on each line. Deleting is refused for the same reason — cancel it instead.
+
+### Submission object
+
+```jsonc
+{
+  "id": "6bb4…",
+  "reference": "SUB-2026-08-001",   // what you write on the parcel
+  "name": "January bulk", "status": "draft", "currency": "GBP",
+  "company_id": "…", "company_code": "CGC", "company_name": "CGC Trading Cards",
+  "tier_id": "…",                   // the parcel's default tier; a line may override it
+  "card_count": 9,
+  "declared_value_total": 3803.07,
+
+  // The shared pot, and where it came from.
+  "shipping_out": 20.0, "shipping_return": 20.0,
+  "insurance": 38.03,               // charged on the parcel's real declared values
+  "handling": 0.0, "other_fees": 0.0,
+  "tier_additional_fees": 0.0,      // charged once per tier used, not per card
+  "shared_pot": 78.03,
+
+  "grading_fees": 151.20, "per_card_fees": 0.0, "declared_value_fees": 0.0,
+  "membership_discount": 0.0,
+  "total_cost": 229.23,
+  "cost_per_card": 25.47,           // an average, and null with no cards
+
+  "allocation_method": "value_weighted",
+  "allocation_note": "Shared costs are split by declared value…",
+  "membership_code": null,
+
+  "submitted_at": null, "received_at": null, "returned_at": null,
+  "tracking_outbound": null, "tracking_return": null, "notes": null,
+
+  "tiers": [{
+    "tier_id": "…", "tier_name": "Bulk", "company_code": "CGC",
+    "card_count": 9, "minimum_cards": 25, "maximum_cards": null,
+    "short_by": 16, "over_by": 0,
+    "blockers": ["CGC Bulk needs 25 cards at that tier; this submission has 9…"]
+  }],
+  "cards": [ /* CardLine */ ],
+  "blockers": [ … ],                // what would stop you sending it as it stands
+  "warnings": [ … ]                 // worth knowing, but not blocking
+}
+```
+
+### CardLine
+
+```jsonc
+{
+  "submission_card_id": "…",        // the line, not the card — the id you PATCH
+  "card_id": "…",
+  "name": "Umbreon VMAX 215/203", "set_label": "Evolving Skies (EVS)",
+  "tier_id": "…", "tier_name": "Bulk",
+  "declared_value": 807.90,
+  "declared_value_source": "system",   // "user" once you set one
+  "declared_value_confidence": "high",
+  "base_fee": 16.80, "membership_discount": null,
+  "grading_fee": 16.80, "per_card_fees": null, "declared_value_fee": null,
+  "allocated_overhead": 8.08,       // this card's share of the pot
+  "total_cost": 24.88,
+  "allocation_weight": 80790,       // 1 under an equal split; the declared value when weighted
+  "predicted_grade": null,
+  "actual_grade": null,             // recorded when the parcel comes back; Phase 8 learns from it
+  "status": "planned",
+  "sort_order": 0,
+  "blockers": ["Declared value £807.90 exceeds CGC Bulk's ceiling of £400.00…"]
+}
+```
+
+### `POST /api/submissions/optimise`
+
+Query: `limit` (default 150).
+
+Three passes. It **routes** every card with an assessment and a price at a batch big enough for the
+bulk tiers to be visible, **packs** by (company, tier), then **re-costs every card at the size its
+batch actually came out at**. That last pass is the point: grading costs depend on the batch, so a
+card that clears your bar at twenty-five may not at six.
+
+```jsonc
+{
+  "status": "partial",
+  "reason": "1 proposed batch(es) are short of their tier's minimum…",
+  "currency": "GBP",
+  "analysable": 14, "worth_grading": 11, "placed": 11, "total_cards": 15,
+  "truncated": false,
+  "routed_at_batch_size": 25,   // routing at 1 would hide the bulk tiers entirely
+  "expected_profit": 1982.28,
+  "total_grading_cost": 384.40,
+  "batches": [{
+    "company_id": "…", "company_code": "CGC",
+    "tier_id": "…", "tier_name": "Bulk",
+    "effective_tier_name": "Economy",   // where they land at the current count
+    "card_count": 9, "minimum_cards": 25, "short_by": 16,
+    "expected_profit": 1459.88, "grading_cost": 224.41,
+    "expected_profit_if_filled": 1502.09,
+    "viable": false,
+    "reason": "CGC Bulk needs 25 cards and this batch has 9. As it stands these would be graded
+               at Economy. Adding 16 more card(s) at this tier is worth £42.21…",
+    "cards": [{
+      "card_id": "…", "name": "Umbreon VMAX 215/203",
+      "tier_name": "Economy",
+      "decision_when_routed": "grade", "decision_in_batch": "grade",
+      "expected_profit": 505.26, "grading_cost": 24.89,
+      "still_pays": true, "reason": null,
+      "cheaper_tier_name": null, "cheaper_tier_saving": null
+    }]
+  }],
+  "stopped_paying": [ /* PlacedCard, with the reason and the number that changed */ ],
+  "unplaced": [ /* worth grading, but no batch could take it */ ],
+  "notes": [ … ]
+}
+```
+
+**`tier_name` and `effective_tier_name` are different questions.** The first is what these cards
+were routed to and what they would be graded at once the batch is full; the second is what they
+would be graded at *today*. While a batch is short they differ, and quoting the routed tier's name
+against the effective tier's price would describe a route that does not exist at that size.
+
+**`stopped_paying` is the honest part.** Cards worth grading in a full batch and not in the batch
+they landed in are listed with the number that changed, and are excluded from every total. They are
+never silently shipped and never silently dropped.
 
 ---
 

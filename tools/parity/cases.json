@@ -3,7 +3,13 @@
     {
       "name": "well evidenced, full ladder",
       "companyCode": "CGC",
-      "probabilities": { "10": 0.28, "9.5": 0.31, "9": 0.24, "8.5": 0.11, "8": 0.06 },
+      "probabilities": {
+        "10": 0.28,
+        "9.5": 0.31,
+        "9": 0.24,
+        "8.5": 0.11,
+        "8": 0.06
+      },
       "netByLabel": {
         "CGC 10": 83036,
         "CGC 9.5": 55756,
@@ -28,17 +34,39 @@
         "trendConfidence": "high",
         "marketConfidence": "high",
         "gradeConfidence": "high",
-        "salesByLabel": { "raw": 22, "CGC 10": 6, "CGC 9.5": 6, "CGC 9": 6, "CGC 8.5": 6, "CGC 8": 6 },
-        "marketRecognition": { "CGC": 8.0, "PSA": 10.0, "ACE": 4.0 }
+        "salesByLabel": {
+          "raw": 22,
+          "CGC 10": 6,
+          "CGC 9.5": 6,
+          "CGC 9": 6,
+          "CGC 8.5": 6,
+          "CGC 8": 6
+        },
+        "marketRecognition": {
+          "CGC": 8.0,
+          "PSA": 10.0,
+          "ACE": 4.0
+        }
       },
       "settings": {}
     },
     {
       "name": "thin coverage, only the top grade priced",
       "companyCode": "CGC",
-      "probabilities": { "10": 0.03, "9.5": 0.14, "9": 0.3, "8.5": 0.31, "8": 0.17, "7.5": 0.05 },
-      "netByLabel": { "CGC 10": 78636 },
-      "grossByLabel": { "CGC 10": 90000 },
+      "probabilities": {
+        "10": 0.03,
+        "9.5": 0.14,
+        "9": 0.3,
+        "8.5": 0.31,
+        "8": 0.17,
+        "7.5": 0.05
+      },
+      "netByLabel": {
+        "CGC 10": 78636
+      },
+      "grossByLabel": {
+        "CGC 10": 90000
+      },
       "costMinor": 5600,
       "batchSize": 25,
       "inputs": {
@@ -49,15 +77,26 @@
         "trendConfidence": "medium",
         "marketConfidence": "high",
         "gradeConfidence": "medium",
-        "salesByLabel": { "raw": 20, "CGC 10": 6 },
-        "marketRecognition": { "CGC": 8.0 }
+        "salesByLabel": {
+          "raw": 20,
+          "CGC 10": 6
+        },
+        "marketRecognition": {
+          "CGC": 8.0
+        }
       },
       "settings": {}
     },
     {
       "name": "conservative risk tolerance shifts the bar",
       "companyCode": "CGC",
-      "probabilities": { "10": 0.1, "9.5": 0.25, "9": 0.35, "8.5": 0.2, "8": 0.1 },
+      "probabilities": {
+        "10": 0.1,
+        "9.5": 0.25,
+        "9": 0.35,
+        "8.5": 0.2,
+        "8": 0.1
+      },
       "netByLabel": {
         "CGC 10": 30000,
         "CGC 9.5": 24000,
@@ -76,16 +115,33 @@
         "trendConfidence": "medium",
         "marketConfidence": "medium",
         "gradeConfidence": "medium",
-        "salesByLabel": { "raw": 12, "CGC 10": 4, "CGC 9.5": 6, "CGC 9": 7, "CGC 8.5": 5, "CGC 8": 5 },
-        "marketRecognition": { "CGC": 8.0 }
+        "salesByLabel": {
+          "raw": 12,
+          "CGC 10": 4,
+          "CGC 9.5": 6,
+          "CGC 9": 7,
+          "CGC 8.5": 5,
+          "CGC 8": 5
+        },
+        "marketRecognition": {
+          "CGC": 8.0
+        }
       },
-      "settings": { "risk_tolerance": "conservative" }
+      "settings": {
+        "risk_tolerance": "conservative"
+      }
     },
     {
       "name": "too cheap for the fee",
       "companyCode": "CGC",
-      "probabilities": { "10": 0.5, "9.5": 0.5 },
-      "netByLabel": { "CGC 10": 900, "CGC 9.5": 700 },
+      "probabilities": {
+        "10": 0.5,
+        "9.5": 0.5
+      },
+      "netByLabel": {
+        "CGC 10": 900,
+        "CGC 9.5": 700
+      },
       "grossByLabel": {},
       "costMinor": 2020,
       "batchSize": 25,
@@ -97,15 +153,25 @@
         "trendConfidence": "medium",
         "marketConfidence": "medium",
         "gradeConfidence": "high",
-        "salesByLabel": { "raw": 8 },
-        "marketRecognition": { "CGC": 8.0 }
+        "salesByLabel": {
+          "raw": 8
+        },
+        "marketRecognition": {
+          "CGC": 8.0
+        }
       },
       "settings": {}
     },
     {
       "name": "aggressive tolerance, losing route",
       "companyCode": "CGC",
-      "probabilities": { "10": 0.06, "9.5": 0.2, "9": 0.34, "8.5": 0.25, "8": 0.15 },
+      "probabilities": {
+        "10": 0.06,
+        "9.5": 0.2,
+        "9": 0.34,
+        "8.5": 0.25,
+        "8": 0.15
+      },
       "netByLabel": {
         "CGC 10": 13000,
         "CGC 9.5": 11500,
@@ -124,10 +190,173 @@
         "trendConfidence": "low",
         "marketConfidence": "medium",
         "gradeConfidence": "low",
-        "salesByLabel": { "raw": 12, "CGC 10": 4, "CGC 9.5": 6, "CGC 9": 7, "CGC 8.5": 5, "CGC 8": 5 },
-        "marketRecognition": { "CGC": 8.0 }
+        "salesByLabel": {
+          "raw": 12,
+          "CGC 10": 4,
+          "CGC 9.5": 6,
+          "CGC 9": 7,
+          "CGC 8.5": 5,
+          "CGC 8": 5
+        },
+        "marketRecognition": {
+          "CGC": 8.0
+        }
       },
-      "settings": { "risk_tolerance": "aggressive" }
+      "settings": {
+        "risk_tolerance": "aggressive"
+      }
+    }
+  ],
+  "allocations": [
+    {
+      "name": "equal split with a spare penny",
+      "totalMinor": 1000,
+      "weights": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "equal split, no remainder",
+      "totalMinor": 900,
+      "weights": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "value weighted, wildly uneven",
+      "totalMinor": 2000,
+      "weights": [
+        400,
+        90000
+      ]
+    },
+    {
+      "name": "value weighted, near-identical",
+      "totalMinor": 1999,
+      "weights": [
+        20000,
+        20001,
+        19999
+      ]
+    },
+    {
+      "name": "one card carries everything",
+      "totalMinor": 4000,
+      "weights": [
+        12345
+      ]
+    },
+    {
+      "name": "weights that are all zero fall back to equal",
+      "totalMinor": 1000,
+      "weights": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "a long tail of tiny weights",
+      "totalMinor": 3333,
+      "weights": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        1
+      ]
+    },
+    {
+      "name": "nothing to split",
+      "totalMinor": 0,
+      "weights": [
+        5,
+        5
+      ]
+    },
+    {
+      "name": "twenty-five cards, prime total",
+      "totalMinor": 4999,
+      "weights": [
+        11,
+        148,
+        285,
+        422,
+        559,
+        696,
+        833,
+        970,
+        1107,
+        1244,
+        1381,
+        1518,
+        1655,
+        1792,
+        1929,
+        2066,
+        2203,
+        2340,
+        2477,
+        2614,
+        2751,
+        2888,
+        3025,
+        3162,
+        3299
+      ]
+    },
+    {
+      "name": "every share rounds up (3 ways)",
+      "totalMinor": 5,
+      "weights": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "every share rounds up (4 ways)",
+      "totalMinor": 7,
+      "weights": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "every share rounds up (6 ways)",
+      "totalMinor": 11,
+      "weights": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "weighted shares that all round up",
+      "totalMinor": 17,
+      "weights": [
+        300,
+        300,
+        300,
+        300,
+        300,
+        300,
+        300,
+        300,
+        300
+      ]
     }
   ]
 }

@@ -29,6 +29,106 @@ const none = (overrides: Record<string, string> = {}) => ({
 export const SEED_CARDS: SeedCard[] = [
   {
     card: {
+      name: 'Eevee Heroes Promo 1',
+      set_code: 'EVS',
+      set_name: 'Evolving Skies',
+      card_number: '171/203',
+      pokemon: 'Eevee',
+      purchase_price: 185,
+      user_raw_value: 200,
+    },
+    condition: {
+      centering: {
+        front: { left: 52, right: 48, top: 51, bottom: 49 },
+        back: { left: 53, right: 47, top: 50, bottom: 50 },
+      },
+      front: none() as never,
+      back: none({ whitening: 'minor' }) as never,
+      notes: 'One of a run bought together — none is worth sending on its own.',
+    },
+  },
+  {
+    card: {
+      name: 'Eevee Heroes Promo 2',
+      set_code: 'EVS',
+      set_name: 'Evolving Skies',
+      card_number: '172/203',
+      pokemon: 'Eevee',
+      purchase_price: 185,
+      user_raw_value: 200,
+    },
+    condition: {
+      centering: {
+        front: { left: 52, right: 48, top: 51, bottom: 49 },
+        back: { left: 53, right: 47, top: 50, bottom: 50 },
+      },
+      front: none() as never,
+      back: none({ whitening: 'minor' }) as never,
+      notes: 'One of a run bought together — none is worth sending on its own.',
+    },
+  },
+  {
+    card: {
+      name: 'Eevee Heroes Promo 3',
+      set_code: 'EVS',
+      set_name: 'Evolving Skies',
+      card_number: '173/203',
+      pokemon: 'Eevee',
+      purchase_price: 185,
+      user_raw_value: 200,
+    },
+    condition: {
+      centering: {
+        front: { left: 52, right: 48, top: 51, bottom: 49 },
+        back: { left: 53, right: 47, top: 50, bottom: 50 },
+      },
+      front: none() as never,
+      back: none({ whitening: 'minor' }) as never,
+      notes: 'One of a run bought together — none is worth sending on its own.',
+    },
+  },
+  {
+    card: {
+      name: 'Eevee Heroes Promo 4',
+      set_code: 'EVS',
+      set_name: 'Evolving Skies',
+      card_number: '174/203',
+      pokemon: 'Eevee',
+      purchase_price: 185,
+      user_raw_value: 200,
+    },
+    condition: {
+      centering: {
+        front: { left: 52, right: 48, top: 51, bottom: 49 },
+        back: { left: 53, right: 47, top: 50, bottom: 50 },
+      },
+      front: none() as never,
+      back: none({ whitening: 'minor' }) as never,
+      notes: 'One of a run bought together — none is worth sending on its own.',
+    },
+  },
+  {
+    card: {
+      name: 'Eevee Heroes Promo 5',
+      set_code: 'EVS',
+      set_name: 'Evolving Skies',
+      card_number: '175/203',
+      pokemon: 'Eevee',
+      purchase_price: 185,
+      user_raw_value: 200,
+    },
+    condition: {
+      centering: {
+        front: { left: 52, right: 48, top: 51, bottom: 49 },
+        back: { left: 53, right: 47, top: 50, bottom: 50 },
+      },
+      front: none() as never,
+      back: none({ whitening: 'minor' }) as never,
+      notes: 'One of a run bought together — none is worth sending on its own.',
+    },
+  },
+  {
+    card: {
       name: 'Umbreon VMAX',
       set_code: 'EVS',
       set_name: 'Evolving Skies',
@@ -287,6 +387,66 @@ export interface SeedMarket {
 
 /** Keyed by card name. Cards missing from this map have no sales — also a state worth showing. */
 export const SEED_MARKET: Record<string, SeedMarket> = {
+  'Eevee Heroes Promo 1': {
+    // Slabs worth a little more than raw: no good alone, worth sending together.
+    series: [
+      { label: 'raw', count: 14, price: 200, spacing: 6, drift: 0.4, jitter: 4 },
+      { label: 'CGC 10', count: 4, price: 292, spacing: 20, offset: 5, drift: 2, jitter: 6 },
+      { label: 'CGC 9.5', count: 5, price: 276, spacing: 17, offset: 3, drift: 2, jitter: 5 },
+      { label: 'CGC 9', count: 6, price: 263, spacing: 15, offset: 4, drift: 1, jitter: 5 },
+      { label: 'CGC 8.5', count: 4, price: 256, spacing: 19, offset: 8, drift: 1, jitter: 4 },
+      { label: 'CGC 8', count: 4, price: 250, spacing: 22, offset: 6, drift: 1, jitter: 4 },
+    ],
+    activeListings: 8,
+  },
+  'Eevee Heroes Promo 2': {
+    // Slabs worth a little more than raw: no good alone, worth sending together.
+    series: [
+      { label: 'raw', count: 14, price: 200, spacing: 6, drift: 0.4, jitter: 4 },
+      { label: 'CGC 10', count: 4, price: 292, spacing: 20, offset: 5, drift: 2, jitter: 6 },
+      { label: 'CGC 9.5', count: 5, price: 276, spacing: 17, offset: 3, drift: 2, jitter: 5 },
+      { label: 'CGC 9', count: 6, price: 263, spacing: 15, offset: 4, drift: 1, jitter: 5 },
+      { label: 'CGC 8.5', count: 4, price: 256, spacing: 19, offset: 8, drift: 1, jitter: 4 },
+      { label: 'CGC 8', count: 4, price: 250, spacing: 22, offset: 6, drift: 1, jitter: 4 },
+    ],
+    activeListings: 8,
+  },
+  'Eevee Heroes Promo 3': {
+    // Slabs worth a little more than raw: no good alone, worth sending together.
+    series: [
+      { label: 'raw', count: 14, price: 200, spacing: 6, drift: 0.4, jitter: 4 },
+      { label: 'CGC 10', count: 4, price: 292, spacing: 20, offset: 5, drift: 2, jitter: 6 },
+      { label: 'CGC 9.5', count: 5, price: 276, spacing: 17, offset: 3, drift: 2, jitter: 5 },
+      { label: 'CGC 9', count: 6, price: 263, spacing: 15, offset: 4, drift: 1, jitter: 5 },
+      { label: 'CGC 8.5', count: 4, price: 256, spacing: 19, offset: 8, drift: 1, jitter: 4 },
+      { label: 'CGC 8', count: 4, price: 250, spacing: 22, offset: 6, drift: 1, jitter: 4 },
+    ],
+    activeListings: 8,
+  },
+  'Eevee Heroes Promo 4': {
+    // Slabs worth a little more than raw: no good alone, worth sending together.
+    series: [
+      { label: 'raw', count: 14, price: 200, spacing: 6, drift: 0.4, jitter: 4 },
+      { label: 'CGC 10', count: 4, price: 292, spacing: 20, offset: 5, drift: 2, jitter: 6 },
+      { label: 'CGC 9.5', count: 5, price: 276, spacing: 17, offset: 3, drift: 2, jitter: 5 },
+      { label: 'CGC 9', count: 6, price: 263, spacing: 15, offset: 4, drift: 1, jitter: 5 },
+      { label: 'CGC 8.5', count: 4, price: 256, spacing: 19, offset: 8, drift: 1, jitter: 4 },
+      { label: 'CGC 8', count: 4, price: 250, spacing: 22, offset: 6, drift: 1, jitter: 4 },
+    ],
+    activeListings: 8,
+  },
+  'Eevee Heroes Promo 5': {
+    // Slabs worth a little more than raw: no good alone, worth sending together.
+    series: [
+      { label: 'raw', count: 14, price: 200, spacing: 6, drift: 0.4, jitter: 4 },
+      { label: 'CGC 10', count: 4, price: 292, spacing: 20, offset: 5, drift: 2, jitter: 6 },
+      { label: 'CGC 9.5', count: 5, price: 276, spacing: 17, offset: 3, drift: 2, jitter: 5 },
+      { label: 'CGC 9', count: 6, price: 263, spacing: 15, offset: 4, drift: 1, jitter: 5 },
+      { label: 'CGC 8.5', count: 4, price: 256, spacing: 19, offset: 8, drift: 1, jitter: 4 },
+      { label: 'CGC 8', count: 4, price: 250, spacing: 22, offset: 6, drift: 1, jitter: 4 },
+    ],
+    activeListings: 8,
+  },
   'Umbreon VMAX': {
     // The one card with a grader's ladder priced end to end, so the decision
     // engine has something it can actually confirm. Everything else in the seed

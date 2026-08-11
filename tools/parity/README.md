@@ -15,11 +15,20 @@ field:
 make parity
 ```
 
-`cases.json` holds hand-built scenarios chosen to exercise the branches that
-actually differ if someone gets them wrong — a well-evidenced grade, a card
-where only the top grade has ever sold, both risk tolerances, and a route that
-loses money. Each case is fed to `decision.evaluate_route` + `decision.decide`
+`cases.json` holds two sets of hand-built scenarios.
+
+**`cases`** exercise the decision engine's branches — a well-evidenced grade, a
+card where only the top grade has ever sold, both risk tolerances, and a route
+that loses money. Each is fed to `decision.evaluate_route` + `decision.decide`
 on both sides, and every number, string, and per-grade row is compared.
+
+**`allocations`** exercise the penny-exact split behind submission costing,
+which is the other place two hand-written implementations drift. Several cases
+exist only to catch a floor/round swap: they use weights whose shares all sit
+above a half-penny, so rounding overshoots the total and the remainder loop
+cannot claw it back. Without them that swap passes silently — which is exactly
+what happened when this section was first written, and why those cases are
+there.
 
 **Any difference is a bug in one of the two.** The comparison prints both
 values and which side produced them; decide which is right before making them
