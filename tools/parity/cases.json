@@ -1,0 +1,133 @@
+{
+  "cases": [
+    {
+      "name": "well evidenced, full ladder",
+      "companyCode": "CGC",
+      "probabilities": { "10": 0.28, "9.5": 0.31, "9": 0.24, "8.5": 0.11, "8": 0.06 },
+      "netByLabel": {
+        "CGC 10": 83036,
+        "CGC 9.5": 55756,
+        "CGC 9": 35516,
+        "CGC 8.5": 28911,
+        "CGC 8": 21440
+      },
+      "grossByLabel": {
+        "CGC 10": 95000,
+        "CGC 9.5": 64000,
+        "CGC 9": 41000,
+        "CGC 8.5": 33000,
+        "CGC 8": 25000
+      },
+      "costMinor": 10130,
+      "batchSize": 25,
+      "inputs": {
+        "rawNetMinor": 18132,
+        "rawValueMinor": 20700,
+        "liquidityScore": 10.0,
+        "trendDirection": "stable",
+        "trendConfidence": "high",
+        "marketConfidence": "high",
+        "gradeConfidence": "high",
+        "salesByLabel": { "raw": 22, "CGC 10": 6, "CGC 9.5": 6, "CGC 9": 6, "CGC 8.5": 6, "CGC 8": 6 },
+        "marketRecognition": { "CGC": 8.0, "PSA": 10.0, "ACE": 4.0 }
+      },
+      "settings": {}
+    },
+    {
+      "name": "thin coverage, only the top grade priced",
+      "companyCode": "CGC",
+      "probabilities": { "10": 0.03, "9.5": 0.14, "9": 0.3, "8.5": 0.31, "8": 0.17, "7.5": 0.05 },
+      "netByLabel": { "CGC 10": 78636 },
+      "grossByLabel": { "CGC 10": 90000 },
+      "costMinor": 5600,
+      "batchSize": 25,
+      "inputs": {
+        "rawNetMinor": 17516,
+        "rawValueMinor": 20000,
+        "liquidityScore": 8.4,
+        "trendDirection": "up",
+        "trendConfidence": "medium",
+        "marketConfidence": "high",
+        "gradeConfidence": "medium",
+        "salesByLabel": { "raw": 20, "CGC 10": 6 },
+        "marketRecognition": { "CGC": 8.0 }
+      },
+      "settings": {}
+    },
+    {
+      "name": "conservative risk tolerance shifts the bar",
+      "companyCode": "CGC",
+      "probabilities": { "10": 0.1, "9.5": 0.25, "9": 0.35, "8.5": 0.2, "8": 0.1 },
+      "netByLabel": {
+        "CGC 10": 30000,
+        "CGC 9.5": 24000,
+        "CGC 9": 20500,
+        "CGC 8.5": 19000,
+        "CGC 8": 17800
+      },
+      "grossByLabel": {},
+      "costMinor": 2020,
+      "batchSize": 25,
+      "inputs": {
+        "rawNetMinor": 16000,
+        "rawValueMinor": 20000,
+        "liquidityScore": 6.2,
+        "trendDirection": "down",
+        "trendConfidence": "medium",
+        "marketConfidence": "medium",
+        "gradeConfidence": "medium",
+        "salesByLabel": { "raw": 12, "CGC 10": 4, "CGC 9.5": 6, "CGC 9": 7, "CGC 8.5": 5, "CGC 8": 5 },
+        "marketRecognition": { "CGC": 8.0 }
+      },
+      "settings": { "risk_tolerance": "conservative" }
+    },
+    {
+      "name": "too cheap for the fee",
+      "companyCode": "CGC",
+      "probabilities": { "10": 0.5, "9.5": 0.5 },
+      "netByLabel": { "CGC 10": 900, "CGC 9.5": 700 },
+      "grossByLabel": {},
+      "costMinor": 2020,
+      "batchSize": 25,
+      "inputs": {
+        "rawNetMinor": 224,
+        "rawValueMinor": 350,
+        "liquidityScore": 7.8,
+        "trendDirection": "stable",
+        "trendConfidence": "medium",
+        "marketConfidence": "medium",
+        "gradeConfidence": "high",
+        "salesByLabel": { "raw": 8 },
+        "marketRecognition": { "CGC": 8.0 }
+      },
+      "settings": {}
+    },
+    {
+      "name": "aggressive tolerance, losing route",
+      "companyCode": "CGC",
+      "probabilities": { "10": 0.06, "9.5": 0.2, "9": 0.34, "8.5": 0.25, "8": 0.15 },
+      "netByLabel": {
+        "CGC 10": 13000,
+        "CGC 9.5": 11500,
+        "CGC 9": 10600,
+        "CGC 8.5": 10100,
+        "CGC 8": 9800
+      },
+      "grossByLabel": {},
+      "costMinor": 2493,
+      "batchSize": 25,
+      "inputs": {
+        "rawNetMinor": 9596,
+        "rawValueMinor": 14800,
+        "liquidityScore": 5.1,
+        "trendDirection": "strong_down",
+        "trendConfidence": "low",
+        "marketConfidence": "medium",
+        "gradeConfidence": "low",
+        "salesByLabel": { "raw": 12, "CGC 10": 4, "CGC 9.5": 6, "CGC 9": 7, "CGC 8.5": 5, "CGC 8": 5 },
+        "marketRecognition": { "CGC": 8.0 }
+      },
+      "settings": { "risk_tolerance": "aggressive" }
+    }
+  ]
+}

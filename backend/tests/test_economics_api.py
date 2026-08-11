@@ -254,8 +254,12 @@ def test_the_envelope_shape_survives_the_economics_landing(client: TestClient, c
         assert "status" in body[block]
 
 
-def test_expected_outcomes_still_names_the_phase_that_delivers_it(client: TestClient, card: dict):
+def test_expected_outcomes_needs_a_condition_assessment_before_it_can_expect_anything(
+    client: TestClient, card: dict
+):
+    """Market data alone is not enough: without P(grade) there is nothing to weight."""
     seed_market(client, card["id"])
     block = client.get(f"/api/cards/{card['id']}/evaluation").json()["expected_outcomes"]
-    assert block["status"] == "not_implemented"
+    assert block["status"] == "insufficient_data"
     assert block["phase"] == 5
+    assert "assess the card first" in block["reason"].lower()

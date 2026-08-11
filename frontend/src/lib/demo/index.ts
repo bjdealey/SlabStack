@@ -16,6 +16,7 @@ import type {
   Card,
   CardEvaluation,
   CardImage,
+  CollectionDecisions,
   ConditionAssessment,
   ConditionWrite,
   Facets,
@@ -358,6 +359,16 @@ function sellingProfile(): SellingProfile | null {
   return profiles.find((item) => item.is_default) ?? profiles[0] ?? null
 }
 
+/** Sales counted per grade label, for per-company slab liquidity. */
+function salesByLabel(card: Card): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const sale of store.sales) {
+    if (sale.catalog_key !== card.catalog_key || sale.is_excluded) continue
+    counts[sale.grade_label] = (counts[sale.grade_label] ?? 0) + 1
+  }
+  return counts
+}
+
 function evaluationFor(card: Card, batchSize = 1): CardEvaluation {
   return buildEvaluation(
     card,
@@ -368,7 +379,113 @@ function evaluationFor(card: Card, batchSize = 1): CardEvaluation {
     store.settings,
     sellingProfile(),
     batchSize,
+    salesByLabel(card),
   )
+}
+
+/** Decisions that mean money would actually be spent on grading. */
+const GRADING_DECISIONS = new Set(['grade', 'grade_if_batch_filled'])
+
+/**
+ * The decision engine across the whole collection (spec sections 32, 37).
+ *
+ * Only cards that can actually be decided are evaluated — a card with no
+ * assessment or no comparable sales has no decision to compute. The ones
+ * skipped are counted and reported, so "expected profit £2,140" is always read
+ * next to "across 3 of your 214 cards".
+ */
+function collectionDecisions(batchSize: number): CollectionDecisions {
+  const analysable = store.cards.filter(
+    (card) =>
+      store.conditions.get(card.id) !== undefined &&
+      store.prices.some((price) => price.catalog_key === card.catalog_key),
+  )
+
+  const result: CollectionDecisions = {
+    status: 'ok',
+    reason: null,
+    currency: currency(),
+    analysed: 0,
+    total_cards: store.cards.length,
+    skipped_not_ready: store.cards.length - analysable.length,
+    truncated: false,
+    batch_size: batchSize,
+    expected_profit: null,
+    potential_graded_value: null,
+    potential_uplift: null,
+    total_grading_cost: null,
+    counts: {},
+    opportunities: [],
+  }
+
+  let profitMinor = 0
+  let gradedMinor = 0
+  let rawMinor = 0
+  let costMinor = 0
+  let counted = 0
+
+  for (const card of analysable) {
+    const evaluated = evaluationFor(card, batchSize)
+    const recommendation = evaluated.recommendation
+    result.counts[recommendation.decision] = (result.counts[recommendation.decision] ?? 0) + 1
+    result.analysed += 1
+    result.opportunities.push({
+      card_id: card.id,
+      name: evaluated.raw.display_name,
+      set_label: evaluated.raw.set_label,
+      decision: recommendation.decision,
+      headline: recommendation.headline,
+      confidence: recommendation.confidence,
+      company_code: recommendation.company_code,
+      tier_name: recommendation.tier_name,
+      expected_profit: recommendation.expected_profit,
+      roi_pct: recommendation.roi_pct,
+      probability_of_profit: recommendation.probability_of_profit,
+      opportunity_score: recommendation.opportunity_score,
+      grading_cost: recommendation.grading_cost,
+      net_raw_alternative: recommendation.net_raw_alternative,
+      coverage: recommendation.coverage,
+      is_user_override: recommendation.is_user_override,
+    })
+
+    // Only cards the engine would actually grade contribute to the totals.
+    // Summing the profit of cards it told you *not* to grade would describe a
+    // plan nobody is going to carry out.
+    if (!GRADING_DECISIONS.has(recommendation.decision)) continue
+    if (recommendation.expected_profit === null) continue
+    const quantity = Math.max(1, card.quantity)
+    profitMinor += market.toMinor(recommendation.expected_profit) * quantity
+    gradedMinor += market.toMinor(recommendation.expected_net ?? 0) * quantity
+    rawMinor += market.toMinor(recommendation.net_raw_alternative ?? 0) * quantity
+    costMinor += market.toMinor(recommendation.grading_cost ?? 0) * quantity
+    counted += 1
+  }
+
+  result.opportunities.sort(
+    (a: CollectionDecisions['opportunities'][number], b: CollectionDecisions['opportunities'][number]) =>
+      (b.opportunity_score ?? -1) - (a.opportunity_score ?? -1) ||
+      (b.expected_profit ?? 0) - (a.expected_profit ?? 0),
+  )
+
+  if (counted) {
+    result.expected_profit = profitMinor / 100
+    result.potential_graded_value = gradedMinor / 100
+    result.potential_uplift = (gradedMinor - rawMinor) / 100
+    result.total_grading_cost = costMinor / 100
+  }
+
+  if (!analysable.length) {
+    result.status = 'insufficient_data'
+    result.reason =
+      'No card has both a condition assessment and comparable sales yet, so there is nothing ' +
+      'to decide. Assess a card and add its sales.'
+  } else if (result.skipped_not_ready) {
+    result.status = 'partial'
+    result.reason =
+      `${result.skipped_not_ready} of ${result.total_cards} cards were skipped: they need a ` +
+      'condition assessment and comparable sales before they can be decided.'
+  }
+  return result
 }
 
 const SORTERS: Record<string, (a: Card, b: Card) => number> = {
@@ -564,6 +681,10 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
       },
     ],
     [method === 'GET' && pathname === '/collection/facets', () => facets()],
+    [
+      method === 'GET' && pathname === '/collection/decisions',
+      () => collectionDecisions(Number(params.get('batch_size') ?? 1) || 1),
+    ],
     [
       method === 'GET' && pathname === '/collection/summary',
       () =>

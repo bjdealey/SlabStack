@@ -6,6 +6,7 @@ import type {
   CardSet,
   CardVariant,
   CardWrite,
+  CollectionDecisions,
   CollectionSummary,
   ConditionAssessment,
   ConditionWrite,
@@ -191,6 +192,10 @@ export const api = {
   // --- Collection ----------------------------------------------------------
   summary: () => request<CollectionSummary>('/collection/summary'),
   facets: () => request<Facets>('/collection/facets'),
+  // Separate from the summary on purpose: this one runs the engine over every
+  // ready card, so the dashboard renders first and this arrives when it can.
+  collectionDecisions: (batchSize = 1) =>
+    request<CollectionDecisions>(`/collection/decisions${query({ batch_size: batchSize })}`),
 
   // --- Reference data ------------------------------------------------------
   listSets: (q?: string) => request<CardSet[]>(`/sets${query({ q })}`),
@@ -276,6 +281,7 @@ export const keys = {
   sales: (id: string) => ['sales', id] as const,
   marketHistory: (id: string) => ['market-history', id] as const,
   summary: ['summary'] as const,
+  collectionDecisions: (batchSize = 1) => ['collection-decisions', batchSize] as const,
   facets: ['facets'] as const,
   sets: (q?: string) => ['sets', q ?? ''] as const,
   variants: ['variants'] as const,

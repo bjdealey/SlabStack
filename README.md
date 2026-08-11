@@ -206,8 +206,8 @@ One call returns everything needed to decide, and the UI only visualises it:
   "liquidity": { … },         // score, band and sale counts, across every grade
   "trend": { … },             // direction per horizon, within one grade
   "grading_options": { … },   // declared value, eligibility, cost per card, net per grade
-  "expected_outcomes": { … }, // Phase 5
-  "recommendation": { … },    // Phase 5 (your overrides work today)
+  "expected_outcomes": { … }, // per-route expected value, with the per-grade working
+  "recommendation": { … },    // the decision, its score, and the route that lost
   "explanation": [ … ],       // the "Why?" panel
   "blockers": [ … ]           // what is still missing, in order
 }
@@ -215,6 +215,10 @@ One call returns everything needed to decide, and the UI only visualises it:
 
 The shape is fixed. Later phases fill in blocks without changing it, and a client written against
 it today keeps working as they land.
+
+`GET /api/collection/decisions` runs the same engine across every card that has enough behind it
+and returns them ranked. It is a separate call from the dashboard summary on purpose: it costs
+about 20 ms a card, so the page paints first and the verdicts arrive after.
 
 ---
 
@@ -247,6 +251,18 @@ finding, which is that cheapest is not best.
 CGC and ACE from the figures in the specification, flagged for you to verify. PSA ships as tier
 structure with no price and `active: false`, so the engine skips it until you enter your own. An
 unpriced tier left active would cost a submission at £0 and make everything look profitable.
+
+**Unknown is not good news.** A grade nobody has sold is unknown, not worthless. Expected value is
+taken over the outcomes that can be priced and reports what share of the distribution that was —
+but the *probability* of profit is not renormalised, so unpriced grades count against it. "This is
+profitable 100% of the time" and "100% of the 13% we can price are profitable" are different
+claims, and only the first is what a reader hears. Where coverage is thin the panel says so beside
+the number, and the reason distinguishes "this card will not grade well enough" from "we cannot
+see enough of the outcomes to say" — those need opposite actions.
+
+**The engine advises; you decide.** A decision you set yourself wins everywhere, including the
+collection totals, and the engine switches to explaining rather than deciding. Handing the card
+back is one click.
 
 ---
 

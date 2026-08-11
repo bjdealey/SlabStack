@@ -200,10 +200,13 @@ def build_summary(db: Session) -> CollectionSummary:
         .where(Card.decision_override.is_not(None))
         .group_by(Card.decision_override)
     ).all()
+    # Deliberately *not* the engine's verdicts: running it over every card takes
+    # long enough to hold up the dashboard, so it lives at /collection/decisions
+    # and loads separately. These are the decisions you made yourself.
     decisions = DecisionCounts(
         reason=(
-            "Decisions shown are your own overrides. Engine-generated decisions need "
-            "grade probabilities and market data."
+            "Decisions you set yourself. The engine's own verdicts are analysed separately, "
+            "because running it across the collection takes a moment."
         )
     )
     for override, count in override_rows:
@@ -294,12 +297,13 @@ def build_summary(db: Session) -> CollectionSummary:
             values_reason=(
                 f"Raw value uses your own figure where you set one, a market valuation for "
                 f"{cards_market_valued} card(s), and the purchase price otherwise. Graded "
-                "upside and expected profit need the grading-cost and decision engines."
+                "upside and expected profit are analysed separately, across the cards that "
+                "have enough behind them to be decided."
                 if cards_market_valued
                 else (
                     "Raw value is your own figure or purchase price — no card has comparable "
-                    "sales yet. Graded upside and expected profit need the grading-cost and "
-                    "decision engines."
+                    "sales yet. Graded upside and expected profit are analysed separately, "
+                    "across the cards that have enough behind them to be decided."
                 )
             ),
         ),

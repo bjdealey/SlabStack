@@ -18,6 +18,7 @@ import type {
   CompanyGradePrediction,
   ConditionAssessment,
   ConditionWrite,
+  ExpectedOutcome,
   ExplanationItem,
   FaceDefects,
   GradingCompany,
@@ -29,11 +30,14 @@ import type {
   GradingOptionsBlock,
   MarketValueRow,
   NetValueRow,
+  RecommendationBlock,
   SellingProfile,
   Severity,
   TrendBlock,
 } from '@/lib/types'
 import { formatMoney } from '@/lib/utils'
+import type { DecisionInputs, DecisionResult, RouteOutcome, Thresholds } from './decision'
+import { decide, evaluateRoute, thresholdsFrom } from './decision'
 import type { DeclaredValue, SubmissionAssumptions } from './economics'
 import {
   assumptionsFrom,
@@ -907,6 +911,338 @@ function buildOptionsBlock(input: {
 }
 
 
+/* --- The decision (spec sections 24-31) ------------------------------------ */
+
+/** A batch size worth re-costing at: the largest minimum any tier asks for. */
+function typicalBatch(options: GradingOption[]): number {
+  const minimums = options.map((option) => option.minimum_cards).filter((value) => value > 1)
+  return minimums.length ? Math.max(...minimums) : 1
+}
+
+/** One evaluated route per usable (company, tier). */
+function routesFor(
+  options: GradingOption[],
+  probabilitiesByCompany: Record<string, Record<number, number>>,
+  netByLabel: Record<string, number>,
+  context: {
+    inputs: DecisionInputs
+    thresholds: Thresholds
+    batchSize: number
+    grossByLabel?: Record<string, number>
+  },
+): RouteOutcome[] {
+  const routes: RouteOutcome[] = []
+  for (const option of options) {
+    if (!option.available || option.total_cost === null) continue
+    const probabilities = probabilitiesByCompany[option.company_code]
+    if (!probabilities || !Object.keys(probabilities).length) continue
+    routes.push(
+      evaluateRoute({
+        companyId: option.company_id,
+        companyCode: option.company_code,
+        tierId: option.tier_id,
+        tierName: option.tier_name,
+        costMinor: toMinor(option.total_cost),
+        probabilities,
+        netByLabel,
+        grossByLabel: context.grossByLabel,
+        inputs: context.inputs,
+        thresholds: context.thresholds,
+        batchSize: context.batchSize,
+      }),
+    )
+  }
+  return routes
+}
+
+function outcomeOut(route: RouteOutcome): ExpectedOutcome {
+  return {
+    company_code: route.companyCode,
+    tier_name: route.tierName,
+    grading_cost: toMajor(route.costMinor),
+    expected_gross: null,
+    expected_net: toMajor(route.expectedNetMinor),
+    expected_profit: toMajor(route.expectedProfitMinor),
+    roi_pct: route.roiPct,
+    probability_of_profit: route.probabilityOfProfit,
+    probability_of_target_profit: route.probabilityOfTarget,
+    minimum_profitable_grade: route.minimumProfitableGrade,
+    probability_at_or_above_minimum: route.probabilityAtOrAboveMinimum,
+    downside: toMajor(route.downsideMinor),
+    upside: toMajor(route.upsideMinor),
+    liquidity_score: route.slabLiquidity,
+    opportunity_score: route.opportunityScore,
+    score_parts: route.scoreParts,
+    coverage: route.coverage,
+    confidence: route.confidence,
+    notes: route.notes,
+    rows: route.distribution.outcomes.map((item) => ({
+      grade: item.grade,
+      label: item.label,
+      probability: item.probability,
+      gross_value: toMajor(item.grossMinor),
+      net_value: toMajor(item.netMinor),
+      profit: toMajor(item.profitMinor),
+    })),
+  }
+}
+
+/**
+ * Expected value per route, and the verdict that falls out of it.
+ *
+ * Every input is already computed by an earlier block, so this is arithmetic
+ * over what the page is already showing rather than a second opinion.
+ */
+function buildDecision(input: {
+  optionsBlock: GradingOptionsBlock
+  gradeBlock: CardEvaluation['grade_prediction']
+  marketBlock: MarketBlock
+  market: MarketSummary
+  companies: GradingCompany[]
+  settings: Record<string, unknown>
+  salesByLabel: Record<string, number>
+  rawNetValue: number | null
+  bestRawValue: number | null
+  batchSize: number
+  /** Re-costed at each tier's own minimum, for "not worth grading *on its own*". */
+  batchedOptions: GradingOptionsBlock | null
+}): { block: CardEvaluation['expected_outcomes']; result: DecisionResult | null } {
+  const thresholds = thresholdsFrom(input.settings)
+  const netOf = (block: GradingOptionsBlock) =>
+    Object.fromEntries(
+      block.net_values.filter((row) => row.net !== null).map((row) => [row.grade_label, toMinor(row.net!)]),
+    )
+  const grossOf = (block: GradingOptionsBlock) =>
+    Object.fromEntries(
+      block.net_values
+        .filter((row) => row.gross !== null)
+        .map((row) => [row.grade_label, toMinor(row.gross!)]),
+    )
+
+  const rawNetMinor = input.rawNetValue === null ? null : toMinor(input.rawNetValue)
+  const inputs: DecisionInputs = {
+    rawNetMinor,
+    rawValueMinor: input.bestRawValue === null ? null : toMinor(input.bestRawValue),
+    liquidityScore: input.market.liquidity.score,
+    trendDirection: input.market.trend.direction,
+    trendConfidence: input.market.trend.confidence,
+    marketConfidence: input.marketBlock.raw?.confidence ?? 'none',
+    gradeConfidence: input.gradeBlock.confidence,
+    salesByLabel: input.salesByLabel,
+    marketRecognition: Object.fromEntries(
+      input.companies.map((company) => [company.code, company.market_recognition_score]),
+    ),
+  }
+
+  const probabilitiesByCompany: Record<string, Record<number, number>> = {}
+  for (const item of input.gradeBlock.by_company) {
+    probabilitiesByCompany[item.company_code] = Object.fromEntries(
+      item.probabilities.map((row) => [row.grade, row.probability]),
+    )
+  }
+
+  if (!Object.keys(probabilitiesByCompany).length || rawNetMinor === null) {
+    return {
+      block: {
+        status: 'insufficient_data',
+        phase: 5,
+        reason: !Object.keys(probabilitiesByCompany).length
+          ? 'Expected value needs grade probabilities — assess the card first.'
+          : 'Expected value needs a raw value to measure grading against.',
+        outcomes: [],
+      },
+      result: null,
+    }
+  }
+
+  const routes = routesFor(
+    input.optionsBlock.options,
+    probabilitiesByCompany,
+    netOf(input.optionsBlock),
+    {
+      inputs,
+      thresholds,
+      batchSize: input.optionsBlock.assumed_batch_size,
+      grossByLabel: grossOf(input.optionsBlock),
+    },
+  )
+
+  let batched: RouteOutcome[] | null = null
+  if (input.batchSize === 1 && input.batchedOptions && input.batchedOptions.assumed_batch_size > 1) {
+    batched = routesFor(
+      input.batchedOptions.options,
+      probabilitiesByCompany,
+      netOf(input.batchedOptions),
+      {
+        inputs,
+        thresholds,
+        batchSize: input.batchedOptions.assumed_batch_size,
+        grossByLabel: grossOf(input.batchedOptions),
+      },
+    )
+  }
+
+  const result = decide(routes, {
+    inputs,
+    thresholds,
+    batchSize: input.batchSize,
+    routesIfBatched: batched,
+  })
+
+  const priced = routes.filter((route) => route.expectedProfitMinor !== null)
+  const outcomes = [...priced]
+    .sort(
+      (a, b) =>
+        (b.opportunityScore ?? 0) - (a.opportunityScore ?? 0) ||
+        (b.expectedProfitMinor ?? 0) - (a.expectedProfitMinor ?? 0),
+    )
+    .map(outcomeOut)
+
+  if (!priced.length) {
+    return {
+      block: {
+        status: 'insufficient_data',
+        phase: 5,
+        reason:
+          'No grader has sales data for the grades this card might get, so there is nothing ' +
+          'to expect. Add graded comparables.',
+        outcomes: [],
+      },
+      result,
+    }
+  }
+
+  // Judged on the route the engine would actually recommend: one thinly priced
+  // also-ran should not make a well-evidenced answer look shaky.
+  const leader = priced.reduce((top, route) =>
+    (route.opportunityScore ?? 0) > (top.opportunityScore ?? 0) ? route : top,
+  )
+  const thin = leader.coverage < 0.8
+  return {
+    block: {
+      status: thin ? 'partial' : 'ok',
+      phase: null,
+      reason: thin
+        ? `Only ${Math.round(leader.coverage * 100)}% of the likely grades have sales behind ` +
+          'them, so the rest are left out of the expectation rather than counted as zero.'
+        : null,
+      outcomes,
+    },
+    result,
+  }
+}
+
+/** The verdict, with the numbers behind it and the route that lost. */
+function recommendationFrom(input: {
+  card: Card
+  result: DecisionResult | null
+  blockers: string[]
+  explanation: ExplanationItem[]
+  netRawAlternative: number | null
+  batchSize: number
+}): RecommendationBlock {
+  const blank = {
+    company_code: null,
+    tier_name: null,
+    expected_profit: null,
+    roi_pct: null,
+    probability_of_profit: null,
+    minimum_profitable_grade: null,
+    opportunity_score: null,
+    score_parts: {},
+    expected_net: null,
+    downside: null,
+    upside: null,
+    probability_of_target_profit: {},
+    grading_cost: null,
+    coverage: 0,
+    review_in_days: null,
+    alternative: null,
+    alternative_note: null,
+  }
+
+  // A decision the user set themselves always wins: the engine explains itself,
+  // it does not overrule them (spec section 35).
+  if (input.card.decision_override) {
+    return {
+      ...blank,
+      status: 'ok',
+      reason: null,
+      phase: null,
+      decision: input.card.decision_override,
+      confidence: 'none',
+      net_raw_alternative: input.netRawAlternative,
+      headline: `Set by you: ${input.card.decision_override
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase())}`,
+      assumed_batch_size: input.batchSize,
+      is_user_override: true,
+      reasons: [
+        {
+          kind: 'info',
+          text: 'Your decision overrides the engine.',
+          detail: input.card.decision_override_reason,
+        },
+        ...input.explanation,
+      ],
+    }
+  }
+
+  const result = input.result
+  if (!result || result.decision === 'insufficient_data') {
+    return {
+      ...blank,
+      status: 'insufficient_data',
+      reason: input.blockers.join('; ') || null,
+      phase: 5,
+      decision: 'insufficient_data',
+      confidence: 'none',
+      headline: result?.headline || 'Not enough data to recommend a decision yet.',
+      net_raw_alternative: input.netRawAlternative,
+      assumed_batch_size: input.batchSize,
+      is_user_override: false,
+      reasons: input.explanation,
+    }
+  }
+
+  const chosen = result.chosen
+  return {
+    status: 'ok',
+    reason: null,
+    phase: null,
+    decision: result.decision,
+    confidence: result.confidence,
+    headline: result.headline,
+    company_code: chosen?.companyCode ?? null,
+    tier_name: chosen?.tierName ?? null,
+    expected_profit: toMajor(chosen?.expectedProfitMinor ?? null),
+    expected_net: toMajor(chosen?.expectedNetMinor ?? null),
+    net_raw_alternative: input.netRawAlternative,
+    roi_pct: chosen?.roiPct ?? null,
+    probability_of_profit: chosen?.probabilityOfProfit ?? null,
+    probability_of_target_profit: chosen?.probabilityOfTarget ?? {},
+    minimum_profitable_grade: chosen?.minimumProfitableGrade ?? null,
+    downside: toMajor(chosen?.downsideMinor ?? null),
+    upside: toMajor(chosen?.upsideMinor ?? null),
+    opportunity_score: chosen?.opportunityScore ?? null,
+    score_parts: chosen?.scoreParts ?? {},
+    grading_cost: toMajor(chosen?.costMinor ?? null),
+    // The batch the *quoted* numbers assume, which is not always the one asked
+    // for: "worth grading, but not on its own" prices a fuller submission.
+    assumed_batch_size: chosen?.batchSize ?? input.batchSize,
+    // Below 1.0 the figures above are conditional on landing a priced grade.
+    coverage: chosen?.coverage ?? 0,
+    review_in_days: result.reviewInDays,
+    alternative: result.alternative ? outcomeOut(result.alternative) : null,
+    alternative_note: result.alternativeNote,
+    is_user_override: false,
+    reasons: [
+      ...result.reasons.map((text) => ({ kind: 'info' as const, text, detail: null })),
+      ...input.explanation,
+    ],
+  }
+}
+
 /** The money half of the "Why?" panel: what grading costs, and what a sale keeps. */
 function economicsExplanation(
   options: GradingOptionsBlock,
@@ -981,7 +1317,7 @@ function economicsExplanation(
         `${best.tier_name} at ${formatMoney(best.grading_cost, currency)}.`,
       detail:
         `Best case only: it assumes the top grade you have ${best.company_code} sales data for. ` +
-        'The probability-weighted figure arrives with the decision engine.',
+        'The recommendation above weighs that against every other grade it might get.',
     })
   } else if (options.best_case.length && market.status !== 'insufficient_data') {
     const missing = options.best_case.filter((row) => row.best_net === null).map((row) => row.company_code)
@@ -1003,6 +1339,8 @@ export function buildEvaluation(
   settings: Record<string, unknown> = {},
   profile: SellingProfile | null = null,
   batchSize = 1,
+  /** Sales counted per grade label, for per-company slab liquidity. */
+  salesByLabel: Record<string, number> = {},
 ): CardEvaluation {
   const today = new Date().toISOString().slice(0, 10)
   const gradeBlock = buildGradePrediction(assessment, companies)
@@ -1025,7 +1363,49 @@ export function buildEvaluation(
     }
   }
 
-  const assumptions = assumptionsFrom(settings, batchSize)
+  // Costing is re-runnable at a different batch on purpose: shipping belongs to
+  // the parcel, not the card, so "worth grading in a submission of 20" needs the
+  // same arithmetic done twice rather than a guess at what a batch would save.
+  const costAt = (size: number) =>
+    buildGradingOptions({ card, companies, currency, market, settings, profile, declared, today, batchSize: size })
+
+  const optionsBlock = costAt(batchSize)
+  const options = optionsBlock.options
+  const netRows = optionsBlock.net_values
+
+  return finishEvaluation({
+    card,
+    assessment,
+    companies,
+    currency,
+    market,
+    settings,
+    profile,
+    batchSize,
+    salesByLabel,
+    gradeBlock,
+    optionsBlock,
+    options,
+    netRows,
+    batchedOptions:
+      batchSize === 1 && typicalBatch(options) > 1 ? costAt(typicalBatch(options)) : null,
+  })
+}
+
+/** One costed options block at a given submission size. */
+function buildGradingOptions(input: {
+  card: Card
+  companies: GradingCompany[]
+  currency: string
+  market: MarketSummary
+  settings: Record<string, unknown>
+  profile: SellingProfile | null
+  declared: DeclaredValue
+  today: string
+  batchSize: number
+}): GradingOptionsBlock {
+  const { companies, currency, market, settings, profile, declared, today } = input
+  const assumptions = assumptionsFrom(settings, input.batchSize)
   const options: GradingOption[] = []
 
   for (const company of companies.filter((c) => c.active)) {
@@ -1116,7 +1496,7 @@ export function buildEvaluation(
   const bestCase = bestCasePerCompany(options, netRows, rawNetRow)
   const usable = options.filter((o) => o.available && o.total_cost !== null)
   const cheapestCost = usable.length ? Math.min(...usable.map((o) => o.total_cost!)) : null
-  const optionsBlock = buildOptionsBlock({
+  return buildOptionsBlock({
     options,
     currency,
     declared,
@@ -1126,6 +1506,27 @@ export function buildEvaluation(
     bestCase,
     cheapestCost,
   })
+}
+
+/** Everything downstream of the costing: the decision, the blocks, the envelope. */
+function finishEvaluation(input: {
+  card: Card
+  assessment: ConditionAssessment | undefined
+  companies: GradingCompany[]
+  currency: string
+  market: MarketSummary
+  settings: Record<string, unknown>
+  profile: SellingProfile | null
+  batchSize: number
+  salesByLabel: Record<string, number>
+  gradeBlock: CardEvaluation['grade_prediction']
+  optionsBlock: GradingOptionsBlock
+  options: GradingOption[]
+  netRows: NetValueRow[]
+  batchedOptions: GradingOptionsBlock | null
+}): CardEvaluation {
+  const { card, assessment, companies, currency, market, profile, gradeBlock, optionsBlock } = input
+  const batchSize = input.batchSize
 
   const notable: string[] = []
   if (assessment) {
@@ -1218,10 +1619,16 @@ export function buildEvaluation(
   )
 
   if (card.user_raw_value === null && card.purchase_price === null) {
+    // Saying "no raw value" when the market has valued the card contradicts the
+    // figure two lines above it. What is missing is *your* number, and that only
+    // matters when nothing else fills the gap.
+    const valued = marketBlock.raw !== null
     explanation.push({
-      kind: 'info',
-      text: 'No raw value recorded.',
-      detail: 'A purchase price or your own raw estimate gives the engine a floor to beat.',
+      kind: valued ? 'info' : 'warn',
+      text: valued ? "Raw value is the market's, not yours." : 'No raw value recorded.',
+      detail: valued
+        ? 'Set your own estimate if you would not actually sell at the market median.'
+        : 'A purchase price or your own raw estimate gives grading something to beat.',
     })
   }
 
@@ -1231,52 +1638,40 @@ export function buildEvaluation(
       ? `${card.set_name} (${card.set_code})`
       : (card.set_name ?? card.set_code ?? null)
 
-  const recommendation = card.decision_override
-    ? {
-        status: 'ok' as const,
-        reason: null,
-        phase: null,
-        decision: card.decision_override,
-        confidence: 'none' as const,
-        headline: `Set by you: ${card.decision_override.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}`,
-        company_code: null,
-        tier_name: null,
-        expected_profit: null,
-        roi_pct: null,
-        probability_of_profit: null,
-        minimum_profitable_grade: null,
-        opportunity_score: null,
-        alternative: null,
-        alternative_note: null,
-        is_user_override: true,
-        reasons: [
-          {
-            kind: 'info' as const,
-            text: 'Your decision overrides the engine.',
-            detail: card.decision_override_reason,
-          },
-          ...explanation,
-        ],
-      }
-    : {
-        status: 'insufficient_data' as const,
-        reason: blockers.join('; ') || null,
-        phase: 5,
-        decision: 'insufficient_data' as const,
-        confidence: 'none' as const,
-        headline: 'Not enough data to recommend a decision yet.',
-        company_code: null,
-        tier_name: null,
-        expected_profit: null,
-        roi_pct: null,
-        probability_of_profit: null,
-        minimum_profitable_grade: null,
-        opportunity_score: null,
-        alternative: null,
-        alternative_note: null,
-        is_user_override: false,
-        reasons: explanation,
-      }
+  const rawNetSaleValue = toMajor(
+    netSaleValue(toMinor(card.user_raw_value ?? marketRawValue ?? 0) || null, profile, false)
+      ?.netMinor ?? null,
+  )
+
+  const { block: outcomesBlock, result: decisionResult } = buildDecision({
+    optionsBlock,
+    gradeBlock,
+    marketBlock,
+    market,
+    companies,
+    settings: input.settings,
+    salesByLabel: input.salesByLabel,
+    rawNetValue: rawNetSaleValue,
+    bestRawValue: card.user_raw_value ?? marketRawValue,
+    batchSize,
+    batchedOptions: input.batchedOptions,
+  })
+  blockers.push(...(decisionResult?.blockers ?? []))
+  // Blockers answer "what would change this?". For a card ruled out on price
+  // alone, nothing in the market data would.
+  const finalBlockers =
+    decisionResult?.decision === 'do_not_grade'
+      ? blockers.filter((item) => !item.startsWith('Add graded sales'))
+      : blockers
+
+  const recommendation = recommendationFrom({
+    card,
+    result: decisionResult,
+    blockers: finalBlockers,
+    explanation,
+    netRawAlternative: rawNetSaleValue,
+    batchSize,
+  })
 
   return {
     card_id: card.id,
@@ -1303,10 +1698,7 @@ export function buildEvaluation(
         card.user_raw_value !== null ? 'user_override' : marketRawValue !== null ? 'market' : null,
       // Selling it raw is the alternative every grading decision is measured
       // against, so it is netted the same way a graded sale is.
-      net_raw_sale_value: toMajor(
-        netSaleValue(toMinor(card.user_raw_value ?? marketRawValue ?? 0) || null, profile, false)
-          ?.netMinor ?? null,
-      ),
+      net_raw_sale_value: rawNetSaleValue,
     },
     condition: {
       status: conditionStatus,
@@ -1354,15 +1746,10 @@ export function buildEvaluation(
           },
     trend: buildTrendBlock(market),
     grading_options: optionsBlock,
-    expected_outcomes: {
-      status: 'not_implemented',
-      phase: 5,
-      reason: 'Expected value needs grade probabilities and graded market prices.',
-      outcomes: [],
-    },
+    expected_outcomes: outcomesBlock,
     recommendation,
     explanation,
-    blockers,
+    blockers: finalBlockers,
     // The weakest link, not the average: a perfect assessment with two sales
     // behind it is still a two-sale answer.
     data_confidence: [

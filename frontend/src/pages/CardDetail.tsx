@@ -9,12 +9,12 @@ import { PageHeader } from '@/components/AppShell'
 import { CardForm } from '@/components/CardForm'
 import { ConditionForm } from '@/components/ConditionForm'
 import { ImageUploader } from '@/components/ImageUploader'
-import { ExplanationList } from '@/components/ExplanationList'
 import { GradeProbabilities } from '@/components/GradeProbabilities'
 import { MarketPanel } from '@/components/MarketPanel'
 import { GradingRoutes } from '@/components/GradingRoutes'
+import { Recommendation } from '@/components/Recommendation'
 import { SalesList } from '@/components/SalesManager'
-import { DecisionBadge, StatusBadge } from '@/components/DecisionBadge'
+import { StatusBadge } from '@/components/DecisionBadge'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -197,73 +197,7 @@ export function CardDetail() {
 
           {evaluated ? (
             <>
-              <Panel>
-                <PanelHeader>
-                  <div>
-                    <PanelTitle>Recommendation</PanelTitle>
-                    <PanelDescription>{evaluated.recommendation.headline}</PanelDescription>
-                  </div>
-                  <DecisionBadge decision={evaluated.recommendation.decision} />
-                </PanelHeader>
-                <PanelBody className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <Metric
-                      label="Expected profit"
-                      value={
-                        evaluated.recommendation.expected_profit === null
-                          ? '—'
-                          : formatMoney(evaluated.recommendation.expected_profit, evaluated.currency, {
-                              signed: true,
-                            })
-                      }
-                    />
-                    <Metric
-                      label="ROI"
-                      value={
-                        evaluated.recommendation.roi_pct === null
-                          ? '—'
-                          : `${evaluated.recommendation.roi_pct.toFixed(0)}%`
-                      }
-                    />
-                    <Metric
-                      label="P(profit)"
-                      value={
-                        evaluated.recommendation.probability_of_profit === null
-                          ? '—'
-                          : `${Math.round(evaluated.recommendation.probability_of_profit * 100)}%`
-                      }
-                    />
-                    <Metric
-                      label="Min. grade"
-                      value={
-                        evaluated.recommendation.minimum_profitable_grade === null
-                          ? '—'
-                          : String(evaluated.recommendation.minimum_profitable_grade)
-                      }
-                    />
-                  </div>
-
-                  {evaluated.blockers.length ? (
-                    <div className="rounded-lg border border-line bg-canvas px-4 py-3">
-                      <p className="text-xs font-medium uppercase tracking-wider text-ink-faint">
-                        Still needed
-                      </p>
-                      <ul className="mt-2 space-y-1 text-sm text-ink-muted">
-                        {evaluated.blockers.map((blocker) => (
-                          <li key={blocker}>• {blocker}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-
-                  <div>
-                    <p className="mb-2.5 text-xs font-medium uppercase tracking-wider text-ink-faint">
-                      Why?
-                    </p>
-                    <ExplanationList items={evaluated.explanation} />
-                  </div>
-                </PanelBody>
-              </Panel>
+              <Recommendation cardId={cardId} evaluation={evaluated} onOverridden={refresh} />
 
               <Panel>
                 <PanelHeader>

@@ -68,8 +68,19 @@ def allocate(total_minor: int, weights: list[int]) -> list[int]:
 
 
 def format_money(minor: int | None, currency: str = "GBP") -> str:
+    """An em dash for ``None``: "not known" and "zero" mean different things.
+
+    A negative amount puts a true minus sign *before* the currency symbol rather
+    than a hyphen after it, matching what the UI renders — so a figure quoted
+    inside an explanation string reads the same as the same figure in a panel
+    beside it.
+    """
     if minor is None:
         return "—"
     symbol = {"GBP": "£", "USD": "$", "EUR": "€", "JPY": "¥"}.get(currency, "")
     major = to_major(minor)
-    return f"{symbol}{major:,.2f}" if symbol else f"{major:,.2f} {currency}"
+    sign = "−" if major < 0 else ""
+    magnitude = abs(major)
+    return (
+        f"{sign}{symbol}{magnitude:,.2f}" if symbol else f"{sign}{magnitude:,.2f} {currency}"
+    )

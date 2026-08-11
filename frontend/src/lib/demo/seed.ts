@@ -89,6 +89,8 @@ export const SEED_CARDS: SeedCard[] = [
     image: 'card-3.jpg',
   },
   {
+    // Assessed and priced, but the slabs barely beat the raw card — the honest
+    // "no" the engine has to be able to give as clearly as it gives a yes.
     card: {
       name: 'Gengar VMAX',
       set_code: 'FST',
@@ -98,6 +100,15 @@ export const SEED_CARDS: SeedCard[] = [
       pokemon: 'Gengar',
       purchase_price: 95,
       user_raw_value: 110,
+    },
+    condition: {
+      centering: {
+        front: { left: 54, right: 46, top: 52, bottom: 48 },
+        back: { left: 55, right: 45, top: 51, bottom: 49 },
+      },
+      front: none({ corner_tr: 'minor' }) as never,
+      back: none({ whitening: 'minor' }) as never,
+      notes: 'Clean enough to grade well. The question is whether the slab is worth anything.',
     },
   },
   {
@@ -277,11 +288,23 @@ export interface SeedMarket {
 /** Keyed by card name. Cards missing from this map have no sales — also a state worth showing. */
 export const SEED_MARKET: Record<string, SeedMarket> = {
   'Umbreon VMAX': {
+    // The one card with a grader's ladder priced end to end, so the decision
+    // engine has something it can actually confirm. Everything else in the seed
+    // is thinner on purpose — a demo where every card is a winner would be
+    // teaching the wrong lesson.
+    //
+    // PSA slabs sell for more, but the demo fixture carries no PSA pricing, so
+    // the engine costs the route it can actually cost. That is the point: it
+    // recommends what you could really do, not the best number on the page.
     series: [
       { label: 'raw', count: 24, price: 212, spacing: 4, drift: -1.4, jitter: 7 },
       { label: 'PSA 10', count: 14, price: 905, spacing: 7, offset: 2, drift: -8, jitter: 30 },
       { label: 'PSA 9', count: 9, price: 372, spacing: 11, offset: 3, drift: -2, jitter: 14 },
+      { label: 'CGC 10', count: 8, price: 604, spacing: 10, offset: 3, drift: -6, jitter: 24 },
       { label: 'CGC 9.5', count: 5, price: 430, spacing: 19, offset: 6, drift: -3, jitter: 18 },
+      { label: 'CGC 9', count: 6, price: 318, spacing: 15, offset: 4, drift: -2, jitter: 14 },
+      { label: 'CGC 8.5', count: 4, price: 272, spacing: 23, offset: 9, drift: -1, jitter: 11 },
+      { label: 'CGC 8', count: 4, price: 249, spacing: 26, offset: 12, drift: -1, jitter: 9 },
     ],
     junk: [
       { daysAgo: 9, price: 640, title: 'Pokemon Job Lot 60 Cards Bundle Evolving Skies' },
@@ -305,9 +328,17 @@ export const SEED_MARKET: Record<string, SeedMarket> = {
     activeListings: 9,
   },
   'Gengar VMAX': {
+    // A full CGC ladder that simply does not pay: the slabs sell for barely
+    // more than the raw card, and the fee eats the difference. The honest "no"
+    // matters as much as the yes — a demo where grading always wins would be
+    // selling something the engine does not believe.
     series: [
       { label: 'raw', count: 12, price: 148, spacing: 8, drift: 2.4, jitter: 6 },
-      { label: 'CGC 9.5', count: 6, price: 296, spacing: 16, offset: 4, drift: 6, jitter: 12 },
+      { label: 'CGC 10', count: 4, price: 172, spacing: 22, offset: 7, drift: 4, jitter: 6 },
+      { label: 'CGC 9.5', count: 6, price: 154, spacing: 16, offset: 4, drift: 6, jitter: 5 },
+      { label: 'CGC 9', count: 7, price: 143, spacing: 14, offset: 3, drift: 3, jitter: 5 },
+      { label: 'CGC 8.5', count: 5, price: 137, spacing: 18, offset: 9, drift: 2, jitter: 4 },
+      { label: 'CGC 8', count: 5, price: 133, spacing: 20, offset: 6, drift: 1, jitter: 4 },
     ],
     activeListings: 6,
   },

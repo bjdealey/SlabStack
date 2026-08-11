@@ -384,17 +384,31 @@ for the rest. No block ever invents a number to look complete.
     }]
   },
 
-  "expected_outcomes": {            // ⏳ Phase 5
-    "status": "not_implemented", "phase": 5, "outcomes": []
+  "expected_outcomes": {            // ✅ one ExpectedOutcome per usable route, best first
+    "status": "ok", "phase": null, "reason": null,
+    "outcomes": [ /* ExpectedOutcome */ ]
   },
 
-  "recommendation": {               // ⏳ Phase 5 (user overrides work now)
-    "status": "insufficient_data", "phase": 5,
-    "decision": "insufficient_data", "confidence": "none",
-    "headline": "Not enough data to recommend a decision yet.",
-    "company_code": null, "tier_name": null,
-    "expected_profit": null, "roi_pct": null, "probability_of_profit": null,
-    "minimum_profitable_grade": null, "opportunity_score": null,
+  "recommendation": {               // ✅ the verdict, and the working behind it
+    "status": "ok", "phase": null, "reason": null,
+    "decision": "grade", "confidence": "high",
+    "headline": "Grade with CGC Standard.",
+    "company_code": "CGC", "tier_name": "Standard",
+    "expected_profit": 460.22,      // over selling raw today, not over zero
+    "expected_net": 742.84,
+    "net_raw_alternative": 181.32,  // the bar grading has to clear
+    "roi_pct": 454.0,               // on the grading fee, not on the card
+    "probability_of_profit": 1.0,
+    "probability_of_target_profit": { "25": 1.0, "50": 1.0, "100": 0.95 },
+    "minimum_profitable_grade": 9.0,
+    "downside": 274.94, "upside": 547.74,   // percentiles, not the worst and best grades
+    "opportunity_score": 95.0,
+    "score_parts": { "profitability": 10.0, "grade_probability": 10.0,
+                     "liquidity": 10.0, "trend": 5.0, "risk": 10.0 },
+    "grading_cost": 101.30,
+    "assumed_batch_size": 25,       // the batch the quoted cost assumes (see below)
+    "coverage": 1.0,                // share of the likely grades that have sales behind them
+    "review_in_days": null,         // set on a Hold (§33)
     "alternative": null,            // the better-on-paper route that was not chosen (§26)
     "alternative_note": null,
     "is_user_override": false,
@@ -421,6 +435,17 @@ for the rest. No block ever invents a number to look complete.
 A `decision_override` set on the card takes precedence and comes back with
 `recommendation.is_user_override: true` — the engine explains itself, but it does not overrule you.
 
+**`assumed_batch_size` is not always the `batch_size` you asked for.** On a
+`grade_if_batch_filled` the engine re-costs the card at each tier's own minimum, so the quoted
+`grading_cost` describes a fuller submission than the one requested. The field reports the batch
+the numbers actually assume; reading it as the request would make the cost a lie.
+
+**`coverage` qualifies every expected figure.** Below `1.0`, `expected_profit`, `expected_net`,
+`roi_pct`, `downside` and `upside` are conditional on the card landing on a grade that has sales
+behind it — grades with none are unknown, not zero, so they are left out of the expectation and
+their share is reported here. `probability_of_profit` is the exception: it is **not**
+renormalised, so unpriced grades count against it.
+
 ### `MarketValueRow`
 
 ```jsonc
@@ -436,20 +461,35 @@ A `decision_override` set on the card takes precedence and comes back with
 }
 ```
 
-### `ExpectedOutcome` (Phase 5)
+### `ExpectedOutcome`
+
+One evaluated (company, tier) route. `rows` is the working behind the expectation: every grade the
+card might get, including the ones with no price, which keep their probability and carry `null`
+values rather than being dropped.
 
 ```jsonc
 {
-  "company_code": "PSA", "tier_name": "Value",
-  "expected_gross": 372.0, "expected_net": 294.0, "expected_profit": 84.0,
-  "roi_pct": 112.0,
-  "probability_of_profit": 0.91,
-  "probability_of_target_profit": { "25": 0.84, "50": 0.71, "100": 0.42 },
-  "minimum_profitable_grade": 9,
-  "downside": -46.0, "upside": 214.0,
-  "liquidity_score": 8.9, "opportunity_score": 87,
-  "rows": [{ "grade": 10, "label": "PSA 10", "probability": 0.58,
-             "gross_value": 500.0, "net_value": 431.0, "profit": 221.0 }]
+  "company_code": "CGC", "tier_name": "Standard",
+  "grading_cost": 101.30,
+  "expected_gross": null, "expected_net": 742.84, "expected_profit": 460.22,
+  "roi_pct": 454.0,
+  "probability_of_profit": 1.0,
+  "probability_of_target_profit": { "25": 1.0, "50": 1.0, "100": 0.95 },
+  "minimum_profitable_grade": 9.0,
+  "probability_at_or_above_minimum": 1.0,   // over every grade, priced or not
+  "downside": 274.94, "upside": 547.74,
+  "liquidity_score": 10.0,                  // this grader's slabs of this card
+  "opportunity_score": 95.0,
+  "score_parts": { "profitability": 10.0, "grade_probability": 10.0,
+                   "liquidity": 10.0, "trend": 5.0, "risk": 10.0 },
+  "coverage": 1.0, "confidence": "high",
+  "notes": [],                              // e.g. what the coverage leaves out
+  "rows": [
+    { "grade": 10, "label": "CGC 10", "probability": 0.71,
+      "gross_value": 950.0, "net_value": 830.36, "profit": 547.74 },
+    { "grade": 7.5, "label": "CGC 7.5", "probability": 0.05,
+      "gross_value": null, "net_value": null, "profit": null }
+  ]
 }
 ```
 
@@ -460,11 +500,50 @@ A `decision_override` set on the card takes precedence and comes back with
 | Method | Path                        | Status | Description                       |
 | ------ | --------------------------- | ------ | --------------------------------- |
 | GET    | `/api/collection/summary`   | ✅     | Dashboard aggregates.             |
+| GET    | `/api/collection/decisions` | ✅     | The decision engine across the collection, ranked. |
 | GET    | `/api/collection/facets`    | ✅     | Distinct values present, for filter menus. |
 
 `summary` returns totals, values, decision counts, per-set breakdown and a `readiness` array. Any
 figure that cannot be calculated yet is `null` with a `values_reason` — a `0` would read as "no
-upside" rather than "not calculated".
+upside" rather than "not calculated". Its `decisions` counts are the overrides *you* set, not the
+engine's verdicts: running the engine over every card is what `/decisions` is for.
+
+### `GET /api/collection/decisions`
+
+Query: `batch_size` (default 1), `limit` (default 300).
+
+Runs `evaluate_card` over every card that has both a current condition assessment and a computed
+price — the rest have no decision to compute, and are counted rather than evaluated. Kept separate
+from `summary` because it costs about 20 ms a card, and a dashboard that blocks for nine seconds is
+a dashboard nobody waits for.
+
+```jsonc
+{
+  "status": "partial",
+  "reason": "1 of 6 cards were skipped: they need a condition assessment and comparable sales…",
+  "currency": "GBP",
+  "analysed": 5, "total_cards": 6, "skipped_not_ready": 1,
+  "truncated": false, "batch_size": 20,
+  "expected_profit": 637.74,        // only across cards it would actually grade
+  "potential_graded_value": 1289.68,
+  "potential_uplift": 753.99,
+  "total_grading_cost": 116.25,
+  "counts": { "grade": 3, "sell_raw": 1, "do_not_grade": 1 },
+  "opportunities": [{
+    "card_id": "…", "name": "Umbreon VMAX 215/203", "set_label": "Evolving Skies (EVS)",
+    "decision": "grade", "headline": "Grade with CGC Economy.", "confidence": "high",
+    "company_code": "CGC", "tier_name": "Economy",
+    "expected_profit": 95.42, "roi_pct": 374.9, "probability_of_profit": 0.9185,
+    "opportunity_score": 95.5, "grading_cost": 25.45, "net_raw_alternative": 179.21,
+    "coverage": 1.0, "is_user_override": false
+  }]
+}
+```
+
+Money totals count **only** the cards the engine would actually grade — summing the expected profit
+of cards it told you not to grade would describe a plan nobody is going to carry out. The totals are
+never returned without `analysed` and `total_cards` beside them. Above `limit` analysable cards the
+sweep is truncated and says so; it is never silently cut.
 
 ---
 

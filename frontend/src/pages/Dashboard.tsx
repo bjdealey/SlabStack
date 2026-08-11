@@ -11,16 +11,42 @@ import {
 } from 'recharts'
 import { ArrowRight, Boxes, Camera, ClipboardCheck, Coins, LineChart } from 'lucide-react'
 import { api, keys } from '@/lib/api'
+import type { CollectionDecisions, Decision } from '@/lib/types'
 import { PageHeader } from '@/components/AppShell'
 import { StatTile } from '@/components/StatTile'
+import { Opportunities } from '@/components/Opportunities'
 import { Panel, PanelBody, PanelDescription, PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState, ErrorState, LoadingPanel } from '@/components/ui/states'
 import { formatMoney, formatNumber } from '@/lib/utils'
 
+/** The batch the collection sweep costs against. Grading in bulk is the norm. */
+const COLLECTION_BATCH = 20
+
+const DECISION_ROWS: readonly (readonly [
+  Decision,
+  string,
+  'positive' | 'brand' | 'caution' | 'neutral' | 'negative' | 'outline',
+])[] = [
+  ['grade', 'Grade', 'positive'],
+  ['grade_if_batch_filled', 'Grade in a batch', 'caution'],
+  ['sell_raw', 'Sell raw', 'brand'],
+  ['hold', 'Hold', 'caution'],
+  ['keep_raw', 'Keep raw', 'neutral'],
+  ['do_not_grade', 'Do not grade', 'negative'],
+  ['insufficient_data', 'Not yet analysable', 'outline'],
+]
+
 export function Dashboard() {
   const summary = useQuery({ queryKey: keys.summary, queryFn: api.summary })
+  // Its own query on purpose: this runs the decision engine over every ready
+  // card, so the dashboard paints first and the verdicts arrive after.
+  const decisions = useQuery({
+    queryKey: keys.collectionDecisions(COLLECTION_BATCH),
+    queryFn: () => api.collectionDecisions(COLLECTION_BATCH),
+    enabled: (summary.data?.totals.cards ?? 0) > 0,
+  })
 
   if (summary.isLoading) return <LoadingPanel label="Loading your collection…" />
   if (summary.isError) {
@@ -35,6 +61,7 @@ export function Dashboard() {
   const { totals, values, readiness } = data
   const currency = values.currency
   const empty = totals.cards === 0
+  const verdicts = decisions.data
 
   return (
     <>
@@ -87,12 +114,11 @@ export function Dashboard() {
             }
             icon={<LineChart className="size-4" />}
           />
-          <StatTile
-            label="Expected profit"
-            value="Not calculated"
-            pending
-            hint="Needs grading costs (Phase 4) and the decision engine (Phase 5)"
-            icon={<ArrowRight className="size-4" />}
+          <ProfitTile
+            loading={decisions.isLoading}
+            decisions={verdicts}
+            currency={currency}
+            totalCards={totals.cards}
           />
         </section>
 
@@ -136,25 +162,34 @@ export function Dashboard() {
             <PanelHeader>
               <div>
                 <PanelTitle>Decisions</PanelTitle>
-                <PanelDescription>{data.decisions.reason}</PanelDescription>
+                <PanelDescription>
+                  {verdicts
+                    ? `The engine's verdict on ${formatNumber(verdicts.analysed)} of your ${formatNumber(verdicts.total_cards)} cards, in a submission of ${verdicts.batch_size}.`
+                    : data.decisions.reason}
+                </PanelDescription>
               </div>
             </PanelHeader>
             <PanelBody className="space-y-2.5 text-sm">
-              {(
-                [
-                  ['grade', 'Grade', 'positive'],
-                  ['sell_raw', 'Sell raw', 'brand'],
-                  ['hold', 'Hold', 'caution'],
-                  ['keep_raw', 'Keep raw', 'neutral'],
-                  ['do_not_grade', 'Do not grade', 'negative'],
-                  ['insufficient_data', 'Not yet analysed', 'outline'],
-                ] as const
-              ).map(([key, label, tone]) => (
-                <div key={key} className="flex items-center justify-between gap-3">
-                  <Badge tone={tone}>{label}</Badge>
-                  <span className="tabular text-ink">{formatNumber(data.decisions[key] ?? 0)}</span>
-                </div>
-              ))}
+              {DECISION_ROWS.map(([key, label, tone]) => {
+                // Cards with neither an assessment nor sales are not "no" — they
+                // are unanswered, and the engine never saw them.
+                const count = verdicts
+                  ? key === 'insufficient_data'
+                    ? (verdicts.counts.insufficient_data ?? 0) + verdicts.skipped_not_ready
+                    : (verdicts.counts[key] ?? 0)
+                  : (data.decisions[key] ?? 0)
+                return (
+                  <div key={key} className="flex items-center justify-between gap-3">
+                    <Badge tone={tone}>{label}</Badge>
+                    <span className="tabular text-ink">
+                      {decisions.isLoading ? '·' : formatNumber(count)}
+                    </span>
+                  </div>
+                )
+              })}
+              {verdicts?.truncated ? (
+                <p className="border-t border-line pt-3 text-xs text-ink-faint">{verdicts.reason}</p>
+              ) : null}
               {data.review_due > 0 ? (
                 <p className="border-t border-line pt-3 text-xs text-caution">
                   {data.review_due} card(s) on hold are due for a recheck.
@@ -163,6 +198,14 @@ export function Dashboard() {
             </PanelBody>
           </Panel>
         </div>
+
+        {!empty ? (
+          <Opportunities
+            decisions={verdicts}
+            loading={decisions.isLoading}
+            error={decisions.error}
+          />
+        ) : null}
 
         {data.by_set.length ? (
           <Panel>
@@ -240,6 +283,61 @@ export function Dashboard() {
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * The one number the whole app exists to produce — so it never appears without
+ * the count of cards it was summed over. "£2,140" across three cards and across
+ * three hundred are different claims.
+ */
+function ProfitTile({
+  loading,
+  decisions,
+  currency,
+  totalCards,
+}: {
+  loading: boolean
+  decisions: CollectionDecisions | undefined
+  currency: string
+  totalCards: number
+}) {
+  if (loading || !decisions) {
+    return (
+      <StatTile
+        label="Expected profit"
+        value={loading ? 'Analysing…' : 'Not calculated'}
+        pending
+        hint={
+          loading
+            ? 'Running the decision engine across your collection'
+            : 'Assess a card and add its comparable sales'
+        }
+        icon={<ArrowRight className="size-4" />}
+      />
+    )
+  }
+
+  const graded =
+    (decisions.counts.grade ?? 0) + (decisions.counts.grade_if_batch_filled ?? 0)
+
+  return (
+    <StatTile
+      label="Expected profit"
+      value={
+        decisions.expected_profit === null
+          ? 'Nothing to grade'
+          : formatMoney(decisions.expected_profit, currency, { compact: true, signed: true })
+      }
+      tone={decisions.expected_profit ? 'positive' : 'neutral'}
+      pending={decisions.expected_profit === null}
+      hint={
+        decisions.expected_profit === null
+          ? `Nothing in the ${formatNumber(decisions.analysed)} analysed card(s) clears your bar`
+          : `Over selling raw, from ${formatNumber(graded)} card(s) worth grading — analysed ${formatNumber(decisions.analysed)} of ${formatNumber(totalCards)}`
+      }
+      icon={<ArrowRight className="size-4" />}
+    />
   )
 }
 
