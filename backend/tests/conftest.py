@@ -32,6 +32,31 @@ def data_dir() -> Path:
 
 
 @pytest.fixture(autouse=True)
+def no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail loudly if a test tries to make a real HTTP request.
+
+    Added after one did. Enabling a data source by default meant a test that
+    previously exercised the "source is off" path started loading the real
+    adapter instead — and it quietly made an outbound request to a live API,
+    passing or failing depending on somebody else's uptime.
+
+    Adapters take an injectable transport precisely so they can be tested
+    without a network. This makes forgetting to pass one an error rather than a
+    surprise, and names the fix in the message.
+    """
+
+    def refuse(self, url: str, **_: object) -> None:
+        raise AssertionError(
+            f"A test tried to reach {url} for real. Pass a RecordedTransport to the provider, "
+            "or monkeypatch load_provider — see tests/test_market_providers.py."
+        )
+
+    monkeypatch.setattr(
+        "app.services.market_data.http.HttpxTransport.get_json", refuse, raising=True
+    )
+
+
+@pytest.fixture(autouse=True)
 def clean_database() -> Iterator[None]:
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

@@ -98,18 +98,22 @@ origin and no API URL is baked into the build.
 
 ### Live market data
 
-Off by default. Nothing in this application reaches the internet until you turn a source on.
+The Pokémon TCG API is **on by default** — it needs no key, no signup and no approval, so there is
+nothing to gain from making you find a switch before anything works. Every other source stays off
+until you enable it, and this one is off in one click: Settings → Data sources. Set
+`SLABSTACK_POKEMONTCG_API_KEY` before starting if you want the higher rate limit.
 
-1. **Settings → Data sources → enable "Pokémon TCG API".** No key, no signup, no approval — it
-   answers anonymously. Set `SLABSTACK_POKEMONTCG_API_KEY` before starting the API if you want the
-   higher rate limit.
-2. **Open a card → "Find in catalogue" → pick the match.** This stores the provider's own id for
-   that card, and a refresh only prices cards it has that id for. Skipping this step is the usual
-   reason a refresh appears to do nothing.
-3. **Settings → Market → Exchange rates.** The provider quotes USD; this app reports one currency.
+1. **Add a card by searching the catalogue.** The Add card dialog starts with a search box: pick a
+   result and the name, set, number and rarity are filled in, and the card is linked for price
+   updates from the moment it exists. "Enter it by hand" is always one click away for anything the
+   catalogue does not have.
+2. **Settings → Market → Exchange rates.** The provider quotes USD; this app reports one currency.
    Set `{"USD_GBP": 0.79}` — your number, not a live rate. Without one, prices are fetched and
    deliberately **not** written, because a guessed rate would rescale every one of them silently.
-4. **Settings → Data sources → "Refresh prices".**
+3. **Settings → Data sources → "Refresh prices".**
+
+Cards added before this, or by hand, can be linked from their Market panel with **Find in
+catalogue**. A refresh only prices cards it has a provider id for.
 
 ```bash
 make doctor
@@ -362,13 +366,16 @@ had never costed.
 
 ## Data and third parties
 
-Your collection never leaves your machine, and **nothing here makes an outbound call until you
-enable a data source**. Every network provider ships disabled; `manual` and `csv` import need no
-network, no key and no terms of service, and are what the application degrades to.
+Your collection never leaves your machine.
 
-One provider has an adapter: the Pokémon TCG API, used through its documented, official API. A
-source that required scraping a site that forbids it would not belong in this application, and the
-provider interface exists partly to make that rule enforceable rather than aspirational.
+One provider is enabled out of the box — the Pokémon TCG API, used through its documented, official
+API — because it needs no key or account and is useless switched off. **It is off in one click**, in
+Settings → Data sources, and then this build makes no outbound request at all. Every other network
+source ships disabled. `manual` and `csv` import need no network, no key and no terms of service,
+and are what the application degrades to.
+
+A source that required scraping a site that forbids it would not belong here, and the provider
+interface exists partly to make that rule enforceable rather than aspirational.
 
 When a source is enabled, what leaves your machine is a card identifier — the provider's own id for
 a card you asked about. No part of your collection, your costs, your decisions or your grading

@@ -295,6 +295,9 @@ def test_an_unlinked_card_is_skipped_with_a_reason(client, db, monkeypatch):
 
 def test_a_disabled_source_refuses_and_says_so(client, db, monkeypatch, linked_card):
     source = db.scalar(select(DataSource).where(DataSource.code == "pokemontcg_io"))
+    source.enabled = False
+    db.commit()
+
     report = market_sync.sync_source(db, source)
     assert report.status == "error"
     assert "disabled" in report.reason

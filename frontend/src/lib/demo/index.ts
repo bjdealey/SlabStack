@@ -590,9 +590,11 @@ const GRADING_DECISIONS = new Set(['grade', 'grade_if_batch_filled'])
  * switch that flipped and did nothing would be worse than one that explains.
  */
 function demoSources() {
-  return (fixtures.dataSources as { code: string; has_adapter?: boolean }[]).map((source) => ({
+  return (
+    fixtures.dataSources as { code: string; has_adapter?: boolean; enabled?: boolean }[]
+  ).map((source) => ({
     ...source,
-    enabled: store.enabledSources[source.code] ?? false,
+    enabled: store.enabledSources[source.code] ?? source.enabled ?? false,
     last_sync_at: null,
     last_sync_status: null,
     last_sync_error: null,

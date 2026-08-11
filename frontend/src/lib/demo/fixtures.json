@@ -1391,7 +1391,7 @@
       "kind": "card_catalog",
       "base_url": "https://api.pokemontcg.io/v2",
       "api_key_env_var": "SLABSTACK_POKEMONTCG_API_KEY",
-      "enabled": false,
+      "enabled": true,
       "priority": 80,
       "has_adapter": true,
       "api_key_present": false,
