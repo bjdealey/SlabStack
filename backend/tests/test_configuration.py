@@ -195,13 +195,19 @@ def test_enums_endpoint_feeds_the_ui(client: TestClient):
 
 def test_later_phase_endpoints_report_their_phase(client: TestClient):
     for path, phase in (
-        ("/api/submissions", 6),
         ("/api/analytics/opportunities", 7),
         ("/api/analytics/accuracy", 8),
     ):
         response = client.get(path)
         assert response.status_code == 501, path
         assert response.json()["error"]["details"]["phase"] == phase
+
+
+def test_submissions_are_no_longer_a_later_phase(client: TestClient):
+    """Phase 6 landed, so the stub has to be gone rather than merely bypassed."""
+    response = client.get("/api/submissions")
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_provider_sync_says_valuation_already_works_without_it(client: TestClient):
