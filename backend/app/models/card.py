@@ -83,6 +83,12 @@ class Card(Base, TimestampMixin):
 
     # --- User overrides (spec section 35: keep system and user values apart) --
     user_raw_value_minor: Mapped[int | None] = money_column()
+    # What to tell the grader this card is worth. Separate from the raw value
+    # because they answer different questions — one is what you would sell it
+    # for today, the other is what you insure the slab for. The engine's own
+    # suggestion is never written here; it is computed per evaluation, so this
+    # column holds only a figure the user typed.
+    user_declared_value_minor: Mapped[int | None] = money_column()
     decision_override: Mapped[str | None] = mapped_column(String(32))
     decision_override_reason: Mapped[str | None] = mapped_column(Text)
     review_after: Mapped[date | None] = mapped_column(Date)  # spec section 33 "recheck in 30 days"

@@ -187,6 +187,23 @@ class TrendBlock(EvaluationBlock):
     sample_size: int = 0
 
 
+class NetValueRow(ApiModel):
+    """What one grade actually nets after the platform has taken its cut."""
+
+    grade_label: str
+    grade: float | None = None
+    gross: float | None = None
+    shipping_income: float | None = None
+    platform_fee: float | None = None
+    payment_fee: float | None = None
+    listing_fee: float | None = None
+    postage_cost: float | None = None
+    packaging_cost: float | None = None
+    total_costs: float | None = None
+    net: float | None = None
+    is_graded: bool = False
+
+
 class GradingOption(ApiModel):
     """One (company, tier) route this card could take."""
 
@@ -197,9 +214,20 @@ class GradingOption(ApiModel):
     tier_name: str | None = None
     currency: str = "GBP"
     declared_value: float | None = None
+    # The cost, broken out — a total with no working shown is a number to
+    # argue with rather than act on.
+    base_fee: float | None = None
+    membership_discount: float | None = None
     grading_fee: float | None = None
+    per_card_fees: float | None = None
+    declared_value_fee: float | None = None
     allocated_overhead: float | None = None
     total_cost: float | None = None
+    shared_total: float | None = Field(
+        default=None, description="The submission-level pot before it was split."
+    )
+    assumed_batch_size: int = 1
+    membership_code: str | None = None
     turnaround_days: int | None = None
     minimum_cards: int = 1
     requires_batch: bool = False
@@ -208,8 +236,55 @@ class GradingOption(ApiModel):
     blockers: list[str] = Field(default_factory=list)
 
 
+class CompanyBestCase(ApiModel):
+    """The best a company could do for this card, priced in that company's own slabs.
+
+    Kept per company on purpose: an ACE 10 does not sell for what a PSA 10
+    sells for, so pairing the cheapest grading fee anywhere with the highest
+    slab price anywhere would invent a route that does not exist.
+    """
+
+    company_id: str
+    company_code: str
+    tier_name: str | None = None
+    grading_cost: float | None = None
+    best_grade_label: str | None = None
+    best_grade: float | None = None
+    best_net: float | None = None
+    upside_vs_raw: float | None = None
+    reason: str | None = Field(
+        default=None, description="Why this company has no best case, when it has none."
+    )
+
+
 class GradingOptionsBlock(EvaluationBlock):
     options: list[GradingOption] = Field(default_factory=list)
+    currency: str = "GBP"
+    best_case: list[CompanyBestCase] = Field(default_factory=list)
+
+    declared_value: float | None = None
+    declared_value_source: str = "system"
+    declared_value_confidence: str = Confidence.NONE.value
+    declared_value_basis: str | None = Field(
+        default=None, description="What the suggested declared value was worked out from."
+    )
+    declared_value_coverage: float | None = Field(
+        default=None,
+        description="Share of the grade distribution covered by grades with sales data.",
+    )
+
+    assumed_batch_size: int = Field(
+        default=1, description="How many cards the shared costs were split across."
+    )
+    allocation_method: str = "equal"
+    allocation_note: str | None = None
+
+    selling_profile_code: str | None = None
+    selling_profile_name: str | None = None
+    #: Net proceeds per grade. Tier-independent, so computed once rather than
+    #: repeated inside every option.
+    net_values: list[NetValueRow] = Field(default_factory=list)
+    cheapest_available_cost: float | None = None
 
 
 class OutcomeRow(ApiModel):

@@ -108,16 +108,34 @@ def test_grading_options_come_from_configuration(client: TestClient, card: dict)
 
     assert {option["company_code"] for option in available} == {"CGC", "ACE"}
 
-    bulk = next(o for o in available if o["company_code"] == "CGC" and o["tier_name"] == "Bulk")
+    # A 25-card bulk tier is offered, and says why it cannot be used for one card.
+    bulk = next(o for o in options if o["company_code"] == "CGC" and o["tier_name"] == "Bulk")
     assert bulk["grading_fee"] == 16.80
     assert bulk["minimum_cards"] == 25
     assert bulk["requires_batch"] is True
+    assert bulk["available"] is False
+    assert bulk["blockers"] == ["Needs 25 cards in one submission; 1 assumed."]
 
     # PSA ships with tier structure but no verified price, so it is offered as
     # unavailable with an actionable blocker rather than costed at zero.
     psa = next(o for o in options if o["company_code"] == "PSA")
     assert psa["available"] is False
     assert "pricing" in psa["blockers"][0].lower()
+    assert psa["total_cost"] is None, "an unpriced tier is never costed"
+
+
+def test_a_bulk_tier_becomes_usable_once_the_batch_is_filled(client: TestClient, card: dict):
+    """The same card can be unusable alone and fine in a batch — that is the point."""
+    body = client.get(
+        f"/api/cards/{card['id']}/evaluation", params={"batch_size": 25}
+    ).json()["grading_options"]
+
+    bulk = next(
+        o for o in body["options"] if o["company_code"] == "CGC" and o["tier_name"] == "Bulk"
+    )
+    assert bulk["available"] is True
+    assert bulk["blockers"] == []
+    assert body["assumed_batch_size"] == 25
 
 
 def test_user_override_wins_over_the_engine(client: TestClient, card: dict):

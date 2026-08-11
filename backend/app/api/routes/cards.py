@@ -208,8 +208,18 @@ def split_card(db: DbSession, card: CardDep, payload: CardSplitRequest | None = 
     description=(
         "The central decision-engine call (spec section 45). Every block carries a status; "
         "blocks whose engine has not been built yet report `not_implemented` or "
-        "`insufficient_data` with the phase that delivers them, never a fabricated number."
+        "`insufficient_data` with the phase that delivers them, never a fabricated number.\n\n"
+        "`batch_size` is how many cards to assume share a submission's shipping and insurance. "
+        "It defaults to 1 — the honest worst case, where one card carries the whole postage — "
+        "and changes which tiers are usable as well as what each one costs."
     ),
 )
-def evaluate(db: DbSession, card: CardDep) -> CardEvaluation:
-    return evaluation.evaluate_card(db, card)
+def evaluate(
+    db: DbSession,
+    card: CardDep,
+    batch_size: Annotated[
+        int,
+        Query(ge=1, le=1000, description="Cards assumed to share one submission."),
+    ] = 1,
+) -> CardEvaluation:
+    return evaluation.evaluate_card(db, card, batch_size=batch_size)

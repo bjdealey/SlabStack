@@ -25,6 +25,7 @@ import type {
   MarketSale,
   MarketSummary,
   Page,
+  SellingProfile,
 } from '@/lib/types'
 import fixtures from './fixtures.json'
 import {
@@ -101,6 +102,7 @@ function blankCard(input: Partial<Card> & { name: string }, id?: string): Card {
     purchase_date: input.purchase_date ?? null,
     status: input.status ?? 'in_collection',
     user_raw_value: input.user_raw_value ?? null,
+    user_declared_value: input.user_declared_value ?? null,
     decision_override: input.decision_override ?? null,
     decision_override_reason: input.decision_override_reason ?? null,
     review_after: input.review_after ?? null,
@@ -351,8 +353,22 @@ function repriceKey(catalogKey: string | null): MarketPrice[] {
   return market.recompute(catalogKey, store.sales, store.prices, marketParams(), currency())
 }
 
-function evaluationFor(card: Card): CardEvaluation {
-  return buildEvaluation(card, store.conditions.get(card.id), store.companies, currency(), summaryFor(card))
+function sellingProfile(): SellingProfile | null {
+  const profiles = (fixtures.sellingProfiles as SellingProfile[]).filter((item) => item.active)
+  return profiles.find((item) => item.is_default) ?? profiles[0] ?? null
+}
+
+function evaluationFor(card: Card, batchSize = 1): CardEvaluation {
+  return buildEvaluation(
+    card,
+    store.conditions.get(card.id),
+    store.companies,
+    currency(),
+    summaryFor(card),
+    store.settings,
+    sellingProfile(),
+    batchSize,
+  )
 }
 
 const SORTERS: Record<string, (a: Card, b: Card) => number> = {
@@ -612,7 +628,7 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
     ],
     [
       method === 'GET' && at(0) === 'cards' && at(2) === 'evaluation',
-      () => evaluationFor(requireCard(at(1))),
+      () => evaluationFor(requireCard(at(1)), Number(params.get('batch_size') ?? 1) || 1),
     ],
 
     // --- Market ------------------------------------------------------------

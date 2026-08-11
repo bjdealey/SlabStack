@@ -106,7 +106,10 @@ class TestGradingConfiguration:
                 "active": True,
             },
         )
-        options = client.get(f"/api/cards/{card['id']}/evaluation").json()["grading_options"]["options"]
+        # PSA Bulk takes 20 cards, so cost it as part of a batch that size.
+        options = client.get(
+            f"/api/cards/{card['id']}/evaluation", params={"batch_size": 20}
+        ).json()["grading_options"]["options"]
         psa_options = [o for o in options if o["company_code"] == "PSA" and o["available"]]
         assert psa_options and psa_options[0]["grading_fee"] == 22.00
 

@@ -25,12 +25,25 @@ import type {
   MarketBlock,
   MarketPrice,
   MarketSummary,
+  CompanyBestCase,
+  GradingOptionsBlock,
   MarketValueRow,
+  NetValueRow,
+  SellingProfile,
   Severity,
   TrendBlock,
 } from '@/lib/types'
 import { formatMoney } from '@/lib/utils'
-import { premiumVsRawPct } from './market'
+import type { DeclaredValue, SubmissionAssumptions } from './economics'
+import {
+  assumptionsFrom,
+  costForTier,
+  eligibleTiers,
+  netByGrade,
+  netSaleValue,
+  suggestDeclaredValue,
+} from './economics'
+import { premiumVsRawPct, toMajor, toMinor } from './market'
 
 export const DEFECT_FIELDS = [
   'corner_tl',
@@ -758,17 +771,266 @@ function marketExplanation(
   return items
 }
 
+
+/**
+ * The best each company could do, priced in its own slabs.
+ *
+ * Strictly within a company: pairing ACE's fee with PSA's slab price would
+ * describe a route that does not exist.
+ */
+function bestCasePerCompany(
+  options: GradingOption[],
+  netRows: NetValueRow[],
+  rawNet: NetValueRow | null,
+): CompanyBestCase[] {
+  const byCompany = new Map<string, GradingOption[]>()
+  for (const option of options) {
+    const group = byCompany.get(option.company_code) ?? []
+    group.push(option)
+    byCompany.set(option.company_code, group)
+  }
+
+  const results: CompanyBestCase[] = []
+  for (const [code, group] of byCompany) {
+    const row: CompanyBestCase = {
+      company_id: group[0].company_id,
+      company_code: code,
+      tier_name: null,
+      grading_cost: null,
+      best_grade_label: null,
+      best_grade: null,
+      best_net: null,
+      upside_vs_raw: null,
+      reason: null,
+    }
+
+    const usable = group.filter((item) => item.available && item.total_cost !== null)
+    if (!usable.length) {
+      row.reason = `No usable ${code} tier for this card.`
+      results.push(row)
+      continue
+    }
+
+    const cheapest = usable.reduce((low, item) =>
+      (item.total_cost ?? Infinity) < (low.total_cost ?? Infinity) ? item : low,
+    )
+    row.tier_name = cheapest.tier_name
+    row.grading_cost = cheapest.total_cost
+
+    const owned = netRows.filter(
+      (item) => item.is_graded && item.grade_label.split(' ')[0].toUpperCase() === code.toUpperCase(),
+    )
+    if (!owned.length) {
+      row.reason = `No ${code} sales stored, so ${code} slabs cannot be priced.`
+      results.push(row)
+      continue
+    }
+
+    const best = owned.reduce((top, item) => ((item.net ?? -Infinity) > (top.net ?? -Infinity) ? item : top))
+    row.best_grade_label = best.grade_label
+    row.best_grade = best.grade
+    row.best_net = best.net
+    if (best.net !== null && rawNet?.net !== null && rawNet?.net !== undefined) {
+      row.upside_vs_raw = Math.round((best.net - rawNet.net - (cheapest.total_cost ?? 0)) * 100) / 100
+    }
+    results.push(row)
+  }
+
+  return results.sort((a, b) => (b.upside_vs_raw ?? -1e9) - (a.upside_vs_raw ?? -1e9))
+}
+
+function buildOptionsBlock(input: {
+  options: GradingOption[]
+  currency: string
+  declared: DeclaredValue
+  assumptions: SubmissionAssumptions
+  profile: SellingProfile | null
+  netRows: NetValueRow[]
+  bestCase: CompanyBestCase[]
+  cheapestCost: number | null
+}): GradingOptionsBlock {
+  const { options, currency, declared, assumptions, profile, netRows, bestCase } = input
+  const usable = options.filter((option) => option.available && option.total_cost !== null)
+
+  const reasons: string[] = []
+  let status: GradingOptionsBlock['status']
+  if (!options.length) {
+    status = 'insufficient_data'
+    reasons.push('No active grading company is configured.')
+  } else if (declared.valueMinor === null) {
+    status = 'partial'
+    reasons.push(
+      'Costs shown without a declared value, so tier ceilings and any percentage-of-value fees ' +
+        'are not applied. Add comparable sales or your own estimate.',
+    )
+  } else if (!profile) {
+    status = 'partial'
+    reasons.push(
+      'No selling profile is configured, so net proceeds cannot be worked out. ' +
+        'Add one in Settings → Selling.',
+    )
+  } else if (!usable.length) {
+    status = 'partial'
+    reasons.push('No tier is usable for this card as things stand — see the reasons below.')
+  } else {
+    status = 'ok'
+  }
+
+  if (assumptions.allocationNote) reasons.push(assumptions.allocationNote)
+  if (options.length && (declared.confidence === 'none' || declared.confidence === 'low')) {
+    reasons.push(
+      `Declared value is a ${confidencePhrase(declared.confidence)} estimate, and it drives tier ` +
+        'eligibility — check it before submitting.',
+    )
+  }
+
+  return {
+    status,
+    phase: status === 'ok' ? null : 4,
+    reason: reasons.join(' ') || null,
+    currency,
+    options,
+    best_case: bestCase,
+    declared_value: toMajor(declared.valueMinor),
+    declared_value_source: declared.source,
+    declared_value_confidence: declared.confidence,
+    declared_value_basis: declared.basis,
+    declared_value_coverage: declared.coverage,
+    assumed_batch_size: assumptions.batchSize,
+    allocation_method: assumptions.allocationMethod,
+    allocation_note: assumptions.allocationNote,
+    selling_profile_code: profile?.code ?? null,
+    selling_profile_name: profile?.name ?? null,
+    net_values: netRows,
+    cheapest_available_cost: input.cheapestCost,
+  }
+}
+
+
+/** The money half of the "Why?" panel: what grading costs, and what a sale keeps. */
+function economicsExplanation(
+  options: GradingOptionsBlock,
+  market: MarketBlock,
+  currency: string,
+  blockers: string[],
+): ExplanationItem[] {
+  const items: ExplanationItem[] = []
+  const usable = options.options.filter((option) => option.available)
+
+  if (!usable.length) {
+    items.push({ kind: 'fail', text: 'No usable grading tier for this card.', detail: null })
+    blockers.push(
+      'Enter current pricing for at least one grading company, or check the tier restrictions ' +
+        'listed under Grading routes.',
+    )
+  } else {
+    const cheapest = usable.reduce((low, item) =>
+      (item.total_cost ?? Infinity) < (low.total_cost ?? Infinity) ? item : low,
+    )
+    const batch =
+      cheapest.assumed_batch_size > 1
+        ? ` in a batch of ${cheapest.assumed_batch_size}`
+        : ' sending it on its own'
+    items.push({
+      kind: 'pass',
+      text: `Cheapest route ${cheapest.company_code} ${cheapest.tier_name} at ${formatMoney(
+        cheapest.total_cost,
+        currency,
+      )}${batch}.`,
+      detail: `${formatMoney(cheapest.grading_fee, currency)} fee plus ${formatMoney(
+        cheapest.allocated_overhead,
+        currency,
+      )} share of shipping and insurance.`,
+    })
+  }
+
+  if (options.declared_value !== null) {
+    const source = options.declared_value_source === 'user' ? 'yours' : 'estimated'
+    items.push({
+      kind: GOOD_CONFIDENCE.has(options.declared_value_confidence) ? 'pass' : 'warn',
+      text: `Declared value ${formatMoney(options.declared_value, currency)} (${source}, ${confidencePhrase(
+        options.declared_value_confidence,
+      )}).`,
+      detail: options.declared_value_basis,
+    })
+  }
+
+  const rawNet = options.net_values.find((row) => !row.is_graded)
+  if (rawNet?.net !== null && rawNet?.net !== undefined) {
+    const kept = rawNet.gross ? rawNet.net / rawNet.gross : null
+    items.push({
+      kind: 'info',
+      text: `Selling it raw nets ${formatMoney(rawNet.net, currency)} after fees and postage.`,
+      detail:
+        kept !== null
+          ? `You keep ${Math.round(kept * 100)}% of the sale price on ${options.selling_profile_name}.`
+          : null,
+    })
+  }
+
+  // Best case, strictly within one company: an ACE 10 does not sell for what a
+  // PSA 10 sells for.
+  const priced = options.best_case.filter((row) => row.upside_vs_raw !== null)
+  if (priced.length) {
+    const best = priced[0]
+    items.push({
+      kind: 'info',
+      text:
+        `Best case ${best.best_grade_label} nets ${formatMoney(best.best_net, currency)} — ` +
+        `${formatMoney(best.upside_vs_raw, currency)} over selling raw, after ${best.company_code} ` +
+        `${best.tier_name} at ${formatMoney(best.grading_cost, currency)}.`,
+      detail:
+        `Best case only: it assumes the top grade you have ${best.company_code} sales data for. ` +
+        'The probability-weighted figure arrives with the decision engine.',
+    })
+  } else if (options.best_case.length && market.status !== 'insufficient_data') {
+    const missing = options.best_case.filter((row) => row.best_net === null).map((row) => row.company_code)
+    blockers.push(
+      `Add graded sales for ${[...missing].sort().join(', ')} so the upside can be netted rather ` +
+        'than guessed at.',
+    )
+  }
+
+  return items
+}
+
 export function buildEvaluation(
   card: Card,
   assessment: ConditionAssessment | undefined,
   companies: GradingCompany[],
   currency: string,
   market: MarketSummary,
+  settings: Record<string, unknown> = {},
+  profile: SellingProfile | null = null,
+  batchSize = 1,
 ): CardEvaluation {
+  const today = new Date().toISOString().slice(0, 10)
+  const gradeBlock = buildGradePrediction(assessment, companies)
+
+  // Value the declared figure against the headline grader's own ladder and
+  // prices — the same company, or the number describes a card that does not
+  // exist.
+  const headline = gradeBlock.by_company[0]
+  const probabilities = headline?.probabilities.length
+    ? Object.fromEntries(headline.probabilities.map((item) => [item.grade, item.probability]))
+    : null
+  let declared = suggestDeclaredValue(card, market.prices, probabilities, headline?.company_code ?? null)
+  if (card.user_declared_value !== null) {
+    declared = {
+      valueMinor: toMinor(card.user_declared_value),
+      source: 'user',
+      confidence: 'high',
+      coverage: null,
+      basis: "Your own figure. The engine's suggestion is kept alongside it, not replaced.",
+    }
+  }
+
+  const assumptions = assumptionsFrom(settings, batchSize)
   const options: GradingOption[] = []
+
   for (const company of companies.filter((c) => c.active)) {
-    const priced = company.tiers.filter((tier) => tier.active && tier.price > 0)
-    if (!priced.length) {
+    const tiers = eligibleTiers(company, declared.valueMinor, assumptions.batchSize, today)
+    if (!tiers.length) {
       options.push({
         company_id: company.id,
         company_code: company.code,
@@ -776,22 +1038,32 @@ export function buildEvaluation(
         tier_id: null,
         tier_name: null,
         currency: company.currency,
-        declared_value: null,
+        declared_value: toMajor(declared.valueMinor),
+        base_fee: null,
+        membership_discount: null,
         grading_fee: null,
+        per_card_fees: null,
+        declared_value_fee: null,
         allocated_overhead: null,
         total_cost: null,
+        shared_total: null,
+        assumed_batch_size: assumptions.batchSize,
+        membership_code: null,
         turnaround_days: null,
         minimum_cards: 1,
         requires_batch: false,
         membership_required: false,
         available: false,
         blockers: [
-          `No priced tier configured for ${company.code}. Add current pricing in Settings → Grading.`,
+          `No active tier configured for ${company.code}. Add current pricing in Settings → Grading.`,
         ],
       })
       continue
     }
-    for (const tier of [...priced].sort((a, b) => a.sort_order - b.sort_order || a.price - b.price)) {
+
+    for (const { tier, blockers } of tiers) {
+      const cost = costForTier(tier, company, declared.valueMinor, assumptions, today)
+      const priced = tier.price > 0
       options.push({
         company_id: company.id,
         company_code: company.code,
@@ -799,19 +1071,61 @@ export function buildEvaluation(
         tier_id: tier.id,
         tier_name: tier.tier_name,
         currency: tier.currency,
-        declared_value: null,
-        grading_fee: tier.price,
-        allocated_overhead: null,
-        total_cost: null,
+        declared_value: toMajor(declared.valueMinor),
+        base_fee: priced ? toMajor(cost.baseFeeMinor) : null,
+        membership_discount: toMajor(cost.membershipDiscountMinor) || null,
+        grading_fee: priced ? toMajor(cost.gradingFeeMinor) : null,
+        per_card_fees: toMajor(cost.perCardFeesMinor) || null,
+        declared_value_fee: toMajor(cost.declaredValueFeeMinor) || null,
+        allocated_overhead: toMajor(cost.allocatedOverheadMinor),
+        // An unpriced tier gets no total: costing it at the overhead alone
+        // would read as a cheap route.
+        total_cost: priced ? toMajor(cost.totalMinor) : null,
+        shared_total: toMajor(cost.sharedTotalMinor) || null,
+        assumed_batch_size: assumptions.batchSize,
+        membership_code: cost.membershipCode,
         turnaround_days: tier.turnaround_days,
         minimum_cards: tier.minimum_cards,
         requires_batch: tier.minimum_cards > 1,
         membership_required: tier.membership_required,
-        available: true,
-        blockers: [],
+        available: blockers.length === 0,
+        blockers,
       })
     }
   }
+
+  const nets = netByGrade(market.prices, profile)
+  const netRows: NetValueRow[] = [...nets.entries()]
+    .sort(([a], [b]) => (a === 'raw' ? -1 : b === 'raw' ? 1 : a.localeCompare(b)))
+    .map(([label, value]) => ({
+      grade_label: label,
+      grade: market.prices.find((price) => price.grade_label === label)?.grade ?? null,
+      gross: toMajor(value.grossMinor),
+      shipping_income: toMajor(value.shippingIncomeMinor) || null,
+      platform_fee: toMajor(value.platformFeeMinor) || null,
+      payment_fee: toMajor(value.paymentFeeMinor) || null,
+      listing_fee: toMajor(value.listingFeeMinor) || null,
+      postage_cost: toMajor(value.postageCostMinor) || null,
+      packaging_cost: toMajor(value.packagingCostMinor) || null,
+      total_costs: toMajor(value.totalCostsMinor),
+      net: toMajor(value.netMinor),
+      is_graded: value.isGraded,
+    }))
+
+  const rawNetRow = netRows.find((row) => !row.is_graded) ?? null
+  const bestCase = bestCasePerCompany(options, netRows, rawNetRow)
+  const usable = options.filter((o) => o.available && o.total_cost !== null)
+  const cheapestCost = usable.length ? Math.min(...usable.map((o) => o.total_cost!)) : null
+  const optionsBlock = buildOptionsBlock({
+    options,
+    currency,
+    declared,
+    assumptions,
+    profile,
+    netRows,
+    bestCase,
+    cheapestCost,
+  })
 
   const notable: string[] = []
   if (assessment) {
@@ -850,7 +1164,6 @@ export function buildEvaluation(
   }
 
   const marketBlock = buildMarketBlock(market, currency)
-  const gradeBlock = buildGradePrediction(assessment, companies)
   const rawPrice = market.prices.find((price) => price.grade_label === 'raw')
   const marketRawValue = rawPrice
     ? (rawPrice.user_value ?? rawPrice.realistic_sale ?? rawPrice.median)
@@ -900,18 +1213,9 @@ export function buildEvaluation(
 
   explanation.push(...marketExplanation(market, marketBlock, blockers))
 
-  const available = options.filter((option) => option.available)
-  if (available.length) {
-    const codes = [...new Set(available.map((option) => option.company_code))].sort()
-    explanation.push({
-      kind: 'pass',
-      text: `Grading tiers configured for ${codes.join(', ')}.`,
-      detail: `${available.length} priced tier(s) available.`,
-    })
-  } else {
-    explanation.push({ kind: 'fail', text: 'No priced grading tier configured.', detail: null })
-    blockers.push('Enter current pricing for at least one grading company.')
-  }
+  explanation.push(
+    ...economicsExplanation(optionsBlock, marketBlock, currency, blockers),
+  )
 
   if (card.user_raw_value === null && card.purchase_price === null) {
     explanation.push({
@@ -997,7 +1301,12 @@ export function buildEvaluation(
       best_raw_value: card.user_raw_value ?? marketRawValue,
       raw_value_source:
         card.user_raw_value !== null ? 'user_override' : marketRawValue !== null ? 'market' : null,
-      net_raw_sale_value: null,
+      // Selling it raw is the alternative every grading decision is measured
+      // against, so it is netted the same way a graded sale is.
+      net_raw_sale_value: toMajor(
+        netSaleValue(toMinor(card.user_raw_value ?? marketRawValue ?? 0) || null, profile, false)
+          ?.netMinor ?? null,
+      ),
     },
     condition: {
       status: conditionStatus,
@@ -1044,14 +1353,7 @@ export function buildEvaluation(
             ...market.liquidity,
           },
     trend: buildTrendBlock(market),
-    grading_options: {
-      status: options.length ? 'partial' : 'insufficient_data',
-      phase: 4,
-      reason: options.length
-        ? 'Tier availability only. Declared value, batch allocation and total cost per card arrive with the grading-economics engine.'
-        : 'No active grading company with a priced tier is configured.',
-      options,
-    },
+    grading_options: optionsBlock,
     expected_outcomes: {
       status: 'not_implemented',
       phase: 5,

@@ -12,6 +12,8 @@ import { ImageUploader } from '@/components/ImageUploader'
 import { ExplanationList } from '@/components/ExplanationList'
 import { GradeProbabilities } from '@/components/GradeProbabilities'
 import { MarketPanel } from '@/components/MarketPanel'
+import { GradingRoutes } from '@/components/GradingRoutes'
+import { SalesList } from '@/components/SalesManager'
 import { DecisionBadge, StatusBadge } from '@/components/DecisionBadge'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -26,12 +28,18 @@ export function CardDetail() {
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [assessing, setAssessing] = useState(false)
+  // Shipping belongs to the parcel, not the card, so costing one card means
+  // assuming a submission around it. One is the honest worst case.
+  const [batchSize, setBatchSize] = useState(1)
 
   const card = useQuery({ queryKey: keys.card(cardId), queryFn: () => api.getCard(cardId) })
   const evaluation = useQuery({
-    queryKey: keys.evaluation(cardId),
-    queryFn: () => api.evaluateCard(cardId),
+    queryKey: keys.evaluation(cardId, batchSize),
+    queryFn: () => api.evaluateCard(cardId, batchSize),
     enabled: Boolean(cardId),
+    // Keep the previous batch's numbers on screen while the next size loads,
+    // so nudging the control does not blank the panel.
+    placeholderData: (previous) => previous,
   })
   const condition = useQuery({
     queryKey: keys.condition(cardId),
@@ -43,7 +51,7 @@ export function CardDetail() {
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: keys.card(cardId) })
-    queryClient.invalidateQueries({ queryKey: keys.evaluation(cardId) })
+    queryClient.invalidateQueries({ queryKey: ['evaluation', cardId] })
     queryClient.invalidateQueries({ queryKey: keys.condition(cardId) })
     queryClient.invalidateQueries({ queryKey: keys.summary })
   }
@@ -317,51 +325,16 @@ export function CardDetail() {
 
               <MarketPanel cardId={cardId} evaluation={evaluated} />
 
-              <Panel>
-                <PanelHeader>
-                  <div>
-                    <PanelTitle>Grading routes</PanelTitle>
-                    <PanelDescription>{evaluated.grading_options.reason}</PanelDescription>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[0.7rem] uppercase tracking-wider text-ink-faint">
-                      Net raw sale
-                    </p>
-                    <p className="tabular text-sm text-ink">
-                      {formatMoney(evaluated.raw.net_raw_sale_value, evaluated.currency)}
-                      <span className="ml-1 text-[0.7rem] text-ink-faint">Phase 4</span>
-                    </p>
-                  </div>
-                </PanelHeader>
-                <PanelBody className="grid gap-2 sm:grid-cols-2">
-                  {evaluated.grading_options.options.map((option, index) => (
-                    <div
-                      key={`${option.company_code}-${option.tier_id ?? index}`}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm text-ink">
-                          {option.company_code}
-                          {option.tier_name ? ` · ${option.tier_name}` : ''}
-                        </p>
-                        <p className="truncate text-xs text-ink-faint">
-                          {option.available
-                            ? [
-                                option.requires_batch ? `min ${option.minimum_cards} cards` : null,
-                                option.turnaround_days ? `${option.turnaround_days} days` : null,
-                              ]
-                                .filter(Boolean)
-                                .join(' · ') || 'No minimum'
-                            : option.blockers[0]}
-                        </p>
-                      </div>
-                      <span className="tabular shrink-0 text-sm text-ink">
-                        {option.available ? formatMoney(option.grading_fee, option.currency) : '—'}
-                      </span>
-                    </div>
-                  ))}
-                </PanelBody>
-              </Panel>
+              <GradingRoutes
+                cardId={cardId}
+                evaluation={evaluated}
+                batchSize={batchSize}
+                onBatchSizeChange={setBatchSize}
+              />
+
+              {/* Evidence last: the decisions above are what the page is for,
+                  and a forty-row sales list between them buries the routes. */}
+              <SalesList cardId={cardId} currency={evaluated.currency} onChange={refresh} />
             </>
           ) : null}
         </div>

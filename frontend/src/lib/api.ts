@@ -164,7 +164,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(count ? { count } : {}),
     }),
-  evaluateCard: (id: string) => request<CardEvaluation>(`/cards/${id}/evaluation`),
+  evaluateCard: (id: string, batchSize = 1) =>
+    request<CardEvaluation>(`/cards/${id}/evaluation${query({ batch_size: batchSize })}`),
 
   // --- Images --------------------------------------------------------------
   uploadImages: (cardId: string, files: File[], side: string) => {
@@ -269,7 +270,7 @@ export const keys = {
   enums: ['enums'] as const,
   cards: (params: CardListParams) => ['cards', params] as const,
   card: (id: string) => ['card', id] as const,
-  evaluation: (id: string) => ['evaluation', id] as const,
+  evaluation: (id: string, batchSize = 1) => ['evaluation', id, batchSize] as const,
   condition: (id: string) => ['condition', id] as const,
   market: (id: string) => ['market', id] as const,
   sales: (id: string) => ['sales', id] as const,

@@ -13,7 +13,7 @@ import { toast } from 'sonner'
 import { api, ApiError, keys } from '@/lib/api'
 import type { CardEvaluation, MarketPrice, MarketSummary, MarketValueRow } from '@/lib/types'
 import { ConfidenceBadge, StatusBadge } from '@/components/DecisionBadge'
-import { AddSaleDialog, ImportSalesDialog, SalesList } from '@/components/SalesManager'
+import { AddSaleDialog, ImportSalesDialog } from '@/components/SalesManager'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
@@ -68,7 +68,7 @@ export function MarketPanel({
     queryClient.invalidateQueries({ queryKey: keys.market(cardId) })
     queryClient.invalidateQueries({ queryKey: keys.sales(cardId) })
     queryClient.invalidateQueries({ queryKey: keys.marketHistory(cardId) })
-    queryClient.invalidateQueries({ queryKey: keys.evaluation(cardId) })
+    queryClient.invalidateQueries({ queryKey: ['evaluation', cardId] })
     queryClient.invalidateQueries({ queryKey: keys.summary })
   }
 
@@ -239,8 +239,6 @@ export function MarketPanel({
           </div>
         </PanelBody>
       </Panel>
-
-      <SalesList cardId={cardId} currency={currency} onChange={refresh} />
 
       <AddSaleDialog
         cardId={cardId}

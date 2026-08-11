@@ -93,26 +93,43 @@ Japanese copy's sales never contaminate an English alt art's median.
 
 ---
 
-## Phase 4 — Grading economics ← next
+## Phase 4 — Grading economics ✅
 
-**Have:** companies, tiers, minimums, declared-value ceilings, memberships, selling profiles, and
-`allocate()` for shared costs.
+What grading actually costs and what a sale actually nets, in
+`app/services/economics.py`.
 
-**Build:**
+- **Declared value** as a probability-weighted figure across the grades the card might come back
+  as — not the top-grade value, because declaring high buys a more expensive tier than the card
+  needs and declaring low leaves it under-insured. Falls down a ladder as evidence thins (graded
+  prices → raw value → what you paid), reporting a lower confidence at each step, and is never
+  below the raw card. Overridable, stored in its own column, kept apart from the suggestion.
+- **Tier eligibility** per card: declared value against each tier's floor and ceiling, batch
+  minimums and maximums, membership requirements, and effective dates. Tiers are returned with
+  their reasons rather than filtered out — "Bulk needs 25 cards and you have three" beats Bulk
+  silently disappearing.
+- **Cost per card** = fee after any membership discount + per-card fees + percentage-of-declared
+  fee + this card's share of shipping out, shipping back, insurance and handling. Split
+  penny-exact through `allocate()`.
+- **`batch_size`** on `GET /cards/{id}/evaluation`, because shipping belongs to the parcel rather
+  than the card: £40 of postage is £40 on one card and £1.60 across twenty-five. Defaults to 1,
+  the honest worst case, and travels back with every figure.
+- **Net sale value** per grade after platform, payment and listing fees, postage and packaging —
+  using the *graded* postage for slabs. `raw.net_raw_sale_value` is real, which is what every
+  grading decision is measured against.
+- **Best case per grader**, and the cost breakdown behind every total.
 
-1. Declared value: a suggestion with a confidence, overridable, stored separately from the user's
-   number. Not simply the PSA 10 value.
-2. Tier eligibility per card: declared value against the ceiling, batch minimums, membership
-   requirements.
-3. Total cost per card = grading fee + per-card fees + allocated share of shipping, insurance,
-   handling and membership.
-4. Allocation methods: equal and value-weighted, user-selectable.
-5. Net sale value per grade after platform fees, payment fees, postage and packaging — using the
-   *graded* postage figures for slabs.
+Value-weighted allocation is accepted as a setting but falls back to equal with a note, because
+weighting by value needs the other cards in the batch. It becomes real in Phase 6.
+
+**Learned the hard way:** the first version of the "best case" line paired the cheapest fee across
+*all* graders with the best slab price across *all* graders — ACE's £18 fee with PSA's £880 slab.
+That route does not exist. Best case is now computed strictly within one company, which is also
+what makes the real insight visible: ACE is the cheapest to grade and CGC is worth far more, so
+cheapest is not best.
 
 ---
 
-## Phase 5 — Decision engine
+## Phase 5 — Decision engine ← next
 
 **Build:**
 
