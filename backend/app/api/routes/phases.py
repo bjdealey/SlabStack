@@ -30,32 +30,16 @@ def identify_card() -> None:
     )
 
 
-@router.get("/market/prices", summary="Market prices for a card (Phase 3)")
-def market_prices() -> None:
-    _stub(
-        "Market valuation is not built yet. Sales and prices can be stored locally now; the "
-        "median, weighted median and quartile engine lands with the market phase.",
-        phase=3,
-        planned_in="Phase 3 — market data: providers, outlier filtering, valuation.",
-    )
-
-
-@router.post("/market/sales/import", summary="Import sold listings (Phase 3)")
-def import_sales() -> None:
-    _stub(
-        "Sales import is not built yet.",
-        phase=3,
-        planned_in="Phase 3 — CSV and provider import with lot/wrong-variant filtering.",
-    )
-
-
-@router.post("/market/refresh", summary="Refresh market data (Phase 3)")
+@router.post("/market/refresh", summary="Fetch sales from a data provider (Phase 3)")
 def refresh_market() -> None:
     _stub(
-        "No market data provider is implemented yet. Enable one in Settings once Phase 3 lands; "
-        "the local database stays the source of truth either way.",
+        "No network market-data provider is connected. Valuation, liquidity and trend are "
+        "built and work today on sales you import: enter them by hand or import a CSV export "
+        "from your marketplace. Provider adapters need an API key and each service's terms "
+        "reviewed, and the local database is the source of truth either way — a provider only "
+        "ever writes into it.",
         phase=3,
-        planned_in="Phase 3 — MarketDataProvider adapters and the refresh job.",
+        planned_in="Phase 3 — MarketDataProvider adapters, once API credentials exist.",
     )
 
 

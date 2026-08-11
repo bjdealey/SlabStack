@@ -47,13 +47,25 @@ IMPLEMENTED_PATHS = [
 
 LATER_PHASE_PATHS = [
     ("post", "/api/cards/identify"),
-    ("get", "/api/market/prices"),
-    ("post", "/api/market/sales/import"),
+    # Valuation is built; fetching sales from a provider still needs credentials.
     ("post", "/api/market/refresh"),
     ("get", "/api/submissions"),
     ("post", "/api/submissions/optimise"),
     ("get", "/api/analytics/opportunities"),
     ("get", "/api/analytics/accuracy"),
+]
+
+# Paths that graduated from a 501 stub to a working endpoint. Listed so that
+# removing one by accident fails a test rather than silently 404ing a client.
+DELIVERED_PATHS = [
+    ("get", "/api/market/prices"),
+    ("get", "/api/market/sales"),
+    ("get", "/api/cards/{card_id}/market"),
+    ("post", "/api/cards/{card_id}/market/sales"),
+    ("post", "/api/cards/{card_id}/market/sales/import"),
+    ("post", "/api/cards/{card_id}/market/recompute"),
+    ("get", "/api/cards/{card_id}/market/history"),
+    ("put", "/api/market/sales/{sale_id}/exclusion"),
 ]
 
 EVALUATION_BLOCKS = [
@@ -87,6 +99,12 @@ def test_documented_path_exists(openapi: dict, method: str, path: str):
 def test_later_phase_path_is_registered(openapi: dict, method: str, path: str):
     """Stubs stay registered so the contract is executable, not aspirational."""
     assert path in openapi["paths"], f"{path} should be registered as a 501 stub"
+    assert method in openapi["paths"][path]
+
+
+@pytest.mark.parametrize(("method", "path"), DELIVERED_PATHS)
+def test_delivered_path_is_registered(openapi: dict, method: str, path: str):
+    assert path in openapi["paths"], f"{path} should be a working endpoint"
     assert method in openapi["paths"][path]
 
 

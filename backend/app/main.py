@@ -24,6 +24,7 @@ from app.api.routes import (
     groups,
     health,
     images,
+    market,
     phases,
 )
 from app.api.routes import (
@@ -40,8 +41,9 @@ logger = logging.getLogger("slabstack")
 DESCRIPTION = """
 A local-first grading and ROI decision engine for Pokémon cards.
 
-**Phase 1 (this build)** — collection database, card CRUD and search, image upload,
-condition assessment storage and scoring, grading/selling configuration, and the
+**Phases 1-3 (this build)** — collection database, card CRUD and search, image upload,
+condition assessment storage and scoring, grade probabilities per grading company,
+sales import with reversible exclusion filtering, valuation/liquidity/trend, and the
 `evaluate_card` envelope every later phase fills in.
 
 Blocks that need engines from later phases report an explicit status
@@ -140,6 +142,7 @@ api.include_router(images.router)
 api.include_router(condition.router)
 api.include_router(groups.router)
 api.include_router(grading.router)
+api.include_router(market.router)
 api.include_router(phases.router)
 app.include_router(api)
 
