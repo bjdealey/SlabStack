@@ -8,6 +8,7 @@ import type {
   CardVariant,
   CardWrite,
   CalibrationState,
+  CatalogLookup,
   CollectionDecisions,
   CollectionFilter,
   CollectionSummary,
@@ -33,9 +34,11 @@ import type {
   OptimiserPlan,
   SettingsResponse,
   SnapshotSeries,
+  SourceState,
   Submission,
   SubmissionReturns,
   SubmissionWrite,
+  SyncReport,
 } from './types'
 
 const BASE = '/api'
@@ -324,6 +327,34 @@ export const api = {
     request<unknown>(`/grading/tiers/${tierId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   listSellingProfiles: () => request<SellingProfile[]>('/selling-profiles'),
   listDataSources: () => request<DataSource[]>('/data-sources'),
+
+  // --- Live market data ----------------------------------------------------
+  // The only calls here that make the server reach the internet.
+  updateDataSource: (code: string, payload: { enabled?: boolean; config?: Record<string, unknown> }) =>
+    request<SourceState>(`/data-sources/${code}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  lookupCard: (params: { name?: string; set_code?: string; card_number?: string }) =>
+    request<CatalogLookup>(`/catalog/lookup${query(params)}`),
+  linkCard: (
+    cardId: string,
+    payload: {
+      external_id: string
+      source_code?: string
+      apply_fields?: string[]
+      set_code?: string | null
+      set_name?: string | null
+      card_number?: string | null
+      rarity?: string | null
+    },
+  ) =>
+    request<{ card_id: string; applied_fields: string[]; catalog_key: string | null }>(
+      `/cards/${cardId}/catalog-link`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  refreshMarket: (cardId?: string) =>
+    request<SyncReport[]>(`/market/refresh${query({ card_id: cardId })}`, { method: 'POST' }),
   getSettings: () => request<SettingsResponse>('/settings'),
   updateSettings: (values: Record<string, unknown>) =>
     request<SettingsResponse>('/settings', { method: 'PATCH', body: JSON.stringify({ values }) }),
@@ -360,5 +391,6 @@ export const keys = {
   gradeRules: ['grade-rules'] as const,
   sellingProfiles: ['selling-profiles'] as const,
   dataSources: ['data-sources'] as const,
+  catalogLookup: (params: Record<string, string | undefined>) => ['catalog-lookup', params] as const,
   settings: ['settings'] as const,
 }

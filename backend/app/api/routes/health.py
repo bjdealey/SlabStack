@@ -39,7 +39,7 @@ def health(db: DbSession) -> HealthResponse:
         cards=db.scalar(select(func.count()).select_from(Card)) or 0,
         grading_companies=db.scalar(select(func.count()).select_from(GradingCompany)) or 0,
         market_sales=db.scalar(select(func.count()).select_from(MarketSale)) or 0,
-        phase="8 — learning",
+        phase="live market data",
     )
 
 

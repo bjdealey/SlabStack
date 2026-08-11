@@ -331,6 +331,18 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
         advanced=True,
     ),
     SettingDefinition(
+        key="fx_rates",
+        label="Exchange rates",
+        type="json",
+        default={},
+        category="market",
+        description=(
+            "Your rates, not live ones. Providers quote USD and EUR; this app reports one "
+            "currency. Keyed like {\"USD_GBP\": 0.79}. Empty means foreign prices are fetched "
+            "but not written — a guessed rate would silently rescale every one of them."
+        ),
+    ),
+    SettingDefinition(
         key="min_sales_medium_confidence",
         label="Sales needed for medium confidence",
         type="integer",

@@ -11,7 +11,14 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError, keys } from '@/lib/api'
-import type { CardEvaluation, MarketPrice, MarketSummary, MarketValueRow } from '@/lib/types'
+import type {
+  Card,
+  CardEvaluation,
+  MarketPrice,
+  MarketSummary,
+  MarketValueRow,
+} from '@/lib/types'
+import { CatalogLookup } from '@/components/CatalogLookup'
 import { ConfidenceBadge, StatusBadge } from '@/components/DecisionBadge'
 import { AddSaleDialog, ImportSalesDialog } from '@/components/SalesManager'
 import { Badge } from '@/components/ui/badge'
@@ -50,9 +57,11 @@ const DIRECTION_TONES: Record<string, 'positive' | 'caution' | 'negative' | 'neu
 export function MarketPanel({
   cardId,
   evaluation,
+  card,
 }: {
   cardId: string
   evaluation: CardEvaluation
+  card?: Card
 }) {
   const queryClient = useQueryClient()
   const [adding, setAdding] = useState(false)
@@ -107,6 +116,7 @@ export function MarketPanel({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <StatusBadge status={block.status} phase={block.phase} />
+            {card ? <CatalogLookup card={card} /> : null}
             <Button size="sm" variant="ghost" onClick={() => setImporting(true)}>
               <Upload /> Import
             </Button>

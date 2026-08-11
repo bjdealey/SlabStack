@@ -173,6 +173,13 @@ class MarketValueRow(ApiModel):
     premium_vs_raw_pct: float | None = None
     is_user_override: bool = False
 
+    # Where the number came from. Null means your own sales, which is the
+    # strongest evidence available and the reason it wins over a provider's
+    # index. A code here means nobody has sold one that you have recorded, so
+    # this is a third party's aggregate standing in.
+    source_code: str | None = None
+    source_name: str | None = None
+
 
 class MarketBlock(EvaluationBlock):
     currency: str = "GBP"

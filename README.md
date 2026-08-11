@@ -12,7 +12,7 @@ no outbound network call in this build.
 
 ---
 
-## Status: Phases 1–8 — feature complete
+## Status: Phases 1–8, plus live market data
 
 | Delivered                                                                     |
 | ----------------------------------------------------------------------------- |
@@ -33,6 +33,7 @@ no outbound network call in this build.
 | **Submission optimiser** — real batch costing, and a re-check that the plan still pays |
 | **Analytics** — ranked opportunities, a selling queue with a price to ask, submission ROI, nine saved cuts |
 | **Learning system** — your predictions marked against what came back, and the model corrected by it |
+| **Live market data** — an opt-in provider adapter, card lookup, and price sync into your own database |
 | 495 backend tests, 46 engine-parity cases and clean lint, run in CI on every pull request |
 | Verified end-to-end in a browser each phase — most real bugs here were found that way |
 
@@ -40,9 +41,14 @@ Market data comes from sales you enter or import. Network provider adapters are 
 they need API credentials and each service's terms reviewed, so `POST /api/market/refresh` is the
 one market endpoint still returning a `501` — and it says what does work without it.
 
-Every phased engine has landed. The two endpoints still returning `501` wait on an external service
-rather than on code: `POST /api/market/refresh` needs a provider's credentials, and
-`POST /api/cards/identify` needs an identification provider. Both say what does work without them.
+**Nothing reaches the internet until you enable a source.** One adapter ships — the Pokémon TCG API,
+which needs no signup, approval or payment — and it fills the *raw* price and the card catalogue. It
+carries no individual sales and no graded prices, so liquidity stays unknown and the grade-or-sell
+decision still needs graded comparables you enter or import. The app says so rather than looking
+fixed.
+
+`POST /api/cards/identify` is the last `501`: image identification needs a vision provider, and it
+will always be a suggestion you confirm.
 
 Blocks with nothing behind them yet report `insufficient_data` with a reason you can act on.
 **Nothing returns an invented number.** See [`docs/ROADMAP.md`](docs/ROADMAP.md).

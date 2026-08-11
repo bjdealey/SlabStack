@@ -257,7 +257,7 @@ export function CardDetail() {
                 <GradeProbabilities block={evaluated.grade_prediction} />
               )}
 
-              <MarketPanel cardId={cardId} evaluation={evaluated} />
+              <MarketPanel cardId={cardId} evaluation={evaluated} card={card.data} />
 
               <GradingRoutes
                 cardId={cardId}

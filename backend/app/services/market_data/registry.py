@@ -38,12 +38,17 @@ def load_provider(source: DataSource) -> MarketDataProvider:
             f"Adapter '{source.provider_class}' for '{source.code}' could not be loaded."
         ) from exc
 
+    config = source.config or {}
     api_key = os.environ.get(source.api_key_env_var) if source.api_key_env_var else None
-    if source.api_key_env_var and not api_key:
+    # Some providers take a key but do not require one — pokemontcg.io works
+    # anonymously at a lower rate limit. Refusing to start without a key there
+    # would block the one source a user can try with no signup at all.
+    optional = bool(config.get("api_key_optional"))
+    if source.api_key_env_var and not api_key and not optional:
         raise ProviderUnavailableError(
             f"Data source '{source.code}' needs {source.api_key_env_var} in the environment."
         )
-    return provider_class(config=source.config or {}, api_key=api_key)
+    return provider_class(config=config, api_key=api_key)
 
 
 def enabled_sources(db: Session) -> list[DataSource]:

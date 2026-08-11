@@ -589,13 +589,73 @@ def recompute_key(
 
 
 def prices_for(db: Session, catalog_key: str) -> list[MarketPrice]:
-    return list(
+    """One price per grade, preferring your own sales over a provider's index.
+
+    ``market_prices`` is unique per ``(catalog_key, grade_label, source_id)``, so
+    a valuation computed from your sales (``source_id IS NULL``) and one fetched
+    from a provider can sit side by side without either overwriting the other.
+    That is the right storage shape and the wrong thing to hand to an engine:
+    asked for "the raw price" it would get two, and pick whichever the database
+    happened to return first.
+
+    So they are resolved here, and the rule is that **your own sales win**. A
+    median computed from twenty-two real sales of this exact card, in your
+    currency, is better evidence than a third party's aggregate index — which
+    covers a market you may not sell in, blends printings this app keeps apart,
+    and cannot tell you how often the card actually trades.
+
+    A provider price is used when there is no sale-derived one for that grade,
+    which is the common case on a fresh collection, and it carries its source so
+    the card page can say where the number came from.
+    """
+    rows = list(
         db.scalars(
             select(MarketPrice)
             .where(MarketPrice.catalog_key == catalog_key)
             .order_by(MarketPrice.grade_label)
         )
     )
+
+    resolved: dict[str, MarketPrice] = {}
+    for row in rows:
+        existing = resolved.get(row.grade_label)
+        if existing is None or _outranks(row, existing):
+            resolved[row.grade_label] = row
+    return sorted(resolved.values(), key=lambda row: (row.grade_label != "raw", row.grade_label))
+
+
+def _outranks(candidate: MarketPrice, incumbent: MarketPrice) -> bool:
+    """Whether ``candidate`` is the better evidence of the two.
+
+    Sale-derived beats provider-sourced, but only when it actually has sales
+    behind it: a row left over from sales that were all later excluded has a
+    zero sample and describes nothing, so a provider's number is better than
+    that. Between two provider rows, the larger sample wins, then the fresher.
+    """
+    candidate_own = candidate.source_id is None and candidate.sample_size > 0
+    incumbent_own = incumbent.source_id is None and incumbent.sample_size > 0
+    if candidate_own != incumbent_own:
+        return candidate_own
+
+    if candidate.sample_size != incumbent.sample_size:
+        return candidate.sample_size > incumbent.sample_size
+
+    return _naive(candidate.computed_at) > _naive(incumbent.computed_at)
+
+
+def _naive(value: datetime | None) -> datetime:
+    """Comparable regardless of where the row came from.
+
+    SQLite has no native timezone, so a ``computed_at`` written as aware reads
+    back naive. Comparing the two raises, and it would only ever raise once two
+    provider rows tied on sample size — a case no test would reach by accident.
+    """
+    if value is None:
+        return _EPOCH
+    return value.replace(tzinfo=None) if value.tzinfo is not None else value
+
+
+_EPOCH = datetime(1970, 1, 1)
 
 
 def premium_vs_raw_pct(raw: MarketPrice | None, graded: MarketPrice) -> float | None:

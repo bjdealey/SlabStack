@@ -29,6 +29,7 @@ from app.api.routes import (
     market,
     phases,
     submissions,
+    sync,
 )
 from app.api.routes import (
     settings as settings_routes,
@@ -149,6 +150,7 @@ api.include_router(market.router)
 api.include_router(submissions.router)
 api.include_router(analytics.router)
 api.include_router(calibration.router)
+api.include_router(sync.router)
 api.include_router(phases.router)
 app.include_router(api)
 
