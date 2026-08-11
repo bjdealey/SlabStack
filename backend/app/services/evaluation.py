@@ -44,6 +44,7 @@ from app.schemas.evaluation import (
     CompanyGradePrediction,
     ConditionBlock,
     ConditionScoreOut,
+    ExpectedOutcome,
     ExpectedOutcomesBlock,
     ExplanationItem,
     GradePredictionBlock,
@@ -54,6 +55,7 @@ from app.schemas.evaluation import (
     MarketBlock,
     MarketValueRow,
     NetValueRow,
+    OutcomeRow,
     RawBlock,
     RecommendationBlock,
     TrendBlock,
@@ -61,12 +63,14 @@ from app.schemas.evaluation import (
 from app.services import (
     cards_service,
     condition_service,
+    decision,
     economics,
     market_service,
     prediction_service,
     predictions,
     settings_service,
 )
+from app.services.identity import grade_label as build_grade_label
 from app.services.prediction_service import ModelParameters, NotEnoughAssessmentError
 
 PHASE_GRADE_PREDICTION = 2
@@ -840,16 +844,41 @@ def evaluate_card(db: Session, card: Card, *, batch_size: int | None = None) -> 
     market_block = _build_market_block(db, summary, currency)
     liquidity_block = _build_liquidity_block(summary)
     trend_block = _build_trend_block(summary)
-    outcomes_block = ExpectedOutcomesBlock(
-        status=BlockStatus.NOT_IMPLEMENTED.value,
-        phase=PHASE_DECISION,
-        reason="Expected value needs the grading-cost and net-sale-value engines.",
+    outcomes_block, decision_result = _build_decision(
+        db,
+        card,
+        settings_values,
+        summary=summary,
+        grade_block=grade_block,
+        options_block=options_block,
+        raw_block=raw_block,
+        market_block=market_block,
+        liquidity_block=liquidity_block,
+        trend_block=trend_block,
+        currency=currency,
+        batch_size=batch_size or 1,
     )
 
     explanation, blockers = _explain(
         card, condition_block, grade_block, options_block, market_block, summary
     )
-    recommendation = _recommend(card, blockers, explanation)
+    blockers.extend(decision_result.blockers if decision_result else [])
+    # Blockers answer "what would change this?". For a card ruled out on price
+    # alone, nothing in the market data would — telling someone to go and find
+    # graded sales for a £3.50 common is busywork dressed as advice.
+    if decision_result is not None and decision_result.decision == Decision.DO_NOT_GRADE.value:
+        blockers = [
+            item for item in blockers if not item.startswith("Add graded sales")
+        ]
+    recommendation = _recommend(
+        card,
+        blockers,
+        explanation,
+        result=decision_result,
+        raw_block=raw_block,
+        currency=currency,
+        batch_size=batch_size or 1,
+    )
 
     return CardEvaluation(
         card_id=card.id,
@@ -950,11 +979,23 @@ def _explain(
     items.extend(_economics_explanation(options_block, market_block, blockers))
 
     if card.user_raw_value_minor is None and card.purchase_price_minor is None:
+        # Saying "no raw value" when the market has valued the card contradicts
+        # the figure two lines above it. What is missing is *your* number, and
+        # that only matters when nothing else fills the gap.
+        valued = market_block.raw is not None
         items.append(
             ExplanationItem(
-                kind="info",
-                text="No raw value recorded.",
-                detail="A purchase price or your own raw estimate gives the engine a floor to beat.",
+                kind="info" if valued else "warn",
+                text=(
+                    "Raw value is the market's, not yours."
+                    if valued
+                    else "No raw value recorded."
+                ),
+                detail=(
+                    "Set your own estimate if you would not actually sell at the market median."
+                    if valued
+                    else "A purchase price or your own raw estimate gives grading something to beat."
+                ),
             )
         )
 
@@ -1169,8 +1210,8 @@ def _economics_explanation(
                 ),
                 detail=(
                     "Best case only: it assumes the top grade you have "
-                    f"{best.company_code} sales data for. The probability-weighted figure "
-                    "arrives with the decision engine."
+                    f"{best.company_code} sales data for. The recommendation above weighs "
+                    "that against every other grade it might get."
                 ),
             )
         )
@@ -1185,9 +1226,261 @@ def _economics_explanation(
     return items
 
 
+def _build_decision(
+    db: Session,
+    card: Card,
+    settings_values: dict,
+    *,
+    summary: market_service.MarketSummary,
+    grade_block: GradePredictionBlock,
+    options_block: GradingOptionsBlock,
+    raw_block: RawBlock,
+    market_block: MarketBlock,
+    liquidity_block: LiquidityBlock,
+    trend_block: TrendBlock,
+    currency: str,
+    batch_size: int,
+) -> tuple[ExpectedOutcomesBlock, decision.DecisionResult | None]:
+    """Expected value per route, and the verdict that falls out of it.
+
+    Every input is already computed by an earlier block, so this is arithmetic
+    over what the page is already showing rather than a second opinion. The
+    decision is derived from the same numbers the user can see.
+    """
+    thresholds = decision.Thresholds.from_settings(settings_values)
+    net_by_label = {
+        row.grade_label: to_minor(row.net) or 0
+        for row in options_block.net_values
+        if row.net is not None
+    }
+    gross_by_label = {
+        row.grade_label: to_minor(row.gross) or 0
+        for row in options_block.net_values
+        if row.gross is not None
+    }
+    raw_net_minor = to_minor(raw_block.net_raw_sale_value)
+    raw_value_minor = to_minor(raw_block.best_raw_value)
+
+    sales_by_label: dict[str, int] = {}
+    if card.catalog_key:
+        for sale in market_service.usable_sales(db, card.catalog_key):
+            sales_by_label[sale.grade_label] = sales_by_label.get(sale.grade_label, 0) + 1
+
+    inputs = decision.DecisionInputs(
+        raw_net_minor=raw_net_minor,
+        raw_value_minor=raw_value_minor,
+        liquidity_score=liquidity_block.score,
+        trend_direction=trend_block.direction,
+        trend_confidence=trend_block.confidence,
+        market_confidence=(market_block.raw.confidence if market_block.raw else Confidence.NONE.value),
+        grade_confidence=grade_block.confidence,
+        sales_by_label=sales_by_label,
+        market_recognition={
+            company.code: company.market_recognition_score
+            for company in db.scalars(select(GradingCompany))
+        },
+    )
+
+    probabilities_by_company = {
+        item.company_code: {row.grade: row.probability for row in item.probabilities}
+        for item in grade_block.by_company
+    }
+
+    if not probabilities_by_company or raw_net_minor is None:
+        reason = (
+            "Expected value needs grade probabilities — assess the card first."
+            if not probabilities_by_company
+            else "Expected value needs a raw value to measure grading against."
+        )
+        return (
+            ExpectedOutcomesBlock(
+                status=BlockStatus.INSUFFICIENT_DATA.value,
+                phase=PHASE_DECISION,
+                reason=reason,
+            ),
+            None,
+        )
+
+    routes = _routes_for(
+        options_block.options,
+        probabilities_by_company,
+        net_by_label,
+        inputs=inputs,
+        thresholds=thresholds,
+        batch_size=options_block.assumed_batch_size,
+        gross_by_label=gross_by_label,
+    )
+
+    # Costing the card again at each tier's own minimum separates "not worth
+    # grading" from "not worth grading on its own".
+    batched: list[decision.RouteOutcome] | None = None
+    if batch_size == 1:
+        larger = _build_grading_options_block(
+            db,
+            card,
+            settings_values,
+            summary=summary,
+            grade_block=grade_block,
+            currency=currency,
+            batch_size=_typical_batch(options_block.options),
+        )
+        if larger.assumed_batch_size > 1:
+            batched = _routes_for(
+                larger.options,
+                probabilities_by_company,
+                {
+                    row.grade_label: to_minor(row.net) or 0
+                    for row in larger.net_values
+                    if row.net is not None
+                },
+                inputs=inputs,
+                thresholds=thresholds,
+                batch_size=larger.assumed_batch_size,
+                gross_by_label={
+                    row.grade_label: to_minor(row.gross) or 0
+                    for row in larger.net_values
+                    if row.gross is not None
+                },
+            )
+
+    result = decision.decide(
+        routes,
+        inputs=inputs,
+        thresholds=thresholds,
+        batch_size=batch_size,
+        routes_if_batched=batched,
+    )
+
+    priced = [route for route in routes if route.expected_profit_minor is not None]
+    outcomes = [
+        _outcome_out(route, currency)
+        for route in sorted(
+            priced,
+            key=lambda item: (item.opportunity_score or 0, item.expected_profit_minor or 0),
+            reverse=True,
+        )
+    ]
+
+    if not priced:
+        block = ExpectedOutcomesBlock(
+            status=BlockStatus.INSUFFICIENT_DATA.value,
+            phase=PHASE_DECISION,
+            reason=(
+                "No grader has sales data for the grades this card might get, so there is "
+                "nothing to expect. Add graded comparables."
+            ),
+        )
+    else:
+        # Judged on the route the engine would actually recommend: one thinly
+        # priced also-ran should not make a well-evidenced answer look shaky.
+        leader = max(priced, key=lambda item: item.opportunity_score or 0)
+        thin = leader.coverage < 0.8
+        block = ExpectedOutcomesBlock(
+            status=BlockStatus.PARTIAL.value if thin else BlockStatus.OK.value,
+            reason=(
+                f"Only {leader.coverage:.0%} of the likely grades have sales behind them, so "
+                "the rest are left out of the expectation rather than counted as zero."
+                if thin
+                else None
+            ),
+            outcomes=outcomes,
+        )
+    return block, result
+
+
+def _typical_batch(options: list[GradingOption]) -> int:
+    """A batch size worth re-costing at: the largest minimum any tier asks for."""
+    minimums = [option.minimum_cards for option in options if option.minimum_cards > 1]
+    return max(minimums) if minimums else 1
+
+
+def _routes_for(
+    options: list[GradingOption],
+    probabilities_by_company: dict[str, dict[float, float]],
+    net_by_label: dict[str, int],
+    *,
+    inputs: decision.DecisionInputs,
+    thresholds: decision.Thresholds,
+    batch_size: int,
+    gross_by_label: dict[str, int] | None = None,
+) -> list[decision.RouteOutcome]:
+    """One evaluated route per usable (company, tier)."""
+    routes: list[decision.RouteOutcome] = []
+    for option in options:
+        if not option.available or option.total_cost is None:
+            continue
+        probabilities = probabilities_by_company.get(option.company_code)
+        if not probabilities:
+            continue
+        routes.append(
+            decision.evaluate_route(
+                company_id=option.company_id,
+                company_code=option.company_code,
+                tier_id=option.tier_id,
+                tier_name=option.tier_name,
+                cost_minor=to_minor(option.total_cost) or 0,
+                probabilities=probabilities,
+                net_by_label=net_by_label,
+                label_for=build_grade_label,
+                inputs=inputs,
+                thresholds=thresholds,
+                batch_size=batch_size,
+                gross_by_label=gross_by_label,
+            )
+        )
+    return routes
+
+
+def _outcome_out(route: decision.RouteOutcome, currency: str) -> ExpectedOutcome:
+    return ExpectedOutcome(
+        company_code=route.company_code,
+        tier_name=route.tier_name,
+        expected_gross=None,
+        expected_net=to_major(route.expected_net_minor),
+        expected_profit=to_major(route.expected_profit_minor),
+        roi_pct=route.roi_pct,
+        probability_of_profit=route.probability_of_profit,
+        probability_of_target_profit=route.probability_of_target,
+        minimum_profitable_grade=route.minimum_profitable_grade,
+        downside=to_major(route.downside_minor),
+        upside=to_major(route.upside_minor),
+        liquidity_score=route.slab_liquidity,
+        opportunity_score=route.opportunity_score,
+        grading_cost=to_major(route.cost_minor),
+        coverage=round(route.coverage, 4),
+        confidence=route.confidence,
+        score_parts=route.score_parts,
+        probability_at_or_above_minimum=route.probability_at_or_above_minimum,
+        notes=route.notes,
+        rows=[
+            OutcomeRow(
+                grade=item.grade,
+                label=item.label,
+                probability=item.probability,
+                gross_value=to_major(item.gross_minor),
+                net_value=to_major(item.net_minor),
+                profit=to_major(item.profit_minor),
+            )
+            for item in route.distribution.outcomes
+        ],
+    )
+
+
 def _recommend(
-    card: Card, blockers: list[str], explanation: list[ExplanationItem]
+    card: Card,
+    blockers: list[str],
+    explanation: list[ExplanationItem],
+    *,
+    result: decision.DecisionResult | None,
+    raw_block: RawBlock,
+    currency: str,
+    batch_size: int,
 ) -> RecommendationBlock:
+    """The verdict, with the numbers behind it and the route that lost.
+
+    A decision the user set themselves always wins: the engine explains itself,
+    it does not overrule them (spec section 35).
+    """
     if card.decision_override:
         return RecommendationBlock(
             status=BlockStatus.OK.value,
@@ -1205,14 +1498,54 @@ def _recommend(
             ],
         )
 
+    if result is None or result.decision == Decision.INSUFFICIENT_DATA.value:
+        return RecommendationBlock(
+            status=BlockStatus.INSUFFICIENT_DATA.value,
+            phase=PHASE_DECISION,
+            decision=Decision.INSUFFICIENT_DATA.value,
+            confidence=Confidence.NONE.value,
+            headline=(result.headline if result else "Not enough data to recommend a decision yet."),
+            reason="; ".join(blockers) if blockers else None,
+            reasons=explanation,
+            net_raw_alternative=raw_block.net_raw_sale_value,
+        )
+
+    chosen = result.chosen
+    reasons = [
+        ExplanationItem(kind="info", text=text) for text in result.reasons
+    ] + explanation
+
     return RecommendationBlock(
-        status=BlockStatus.INSUFFICIENT_DATA.value,
-        phase=PHASE_DECISION,
-        decision=Decision.INSUFFICIENT_DATA.value,
-        confidence=Confidence.NONE.value,
-        headline="Not enough data to recommend a decision yet.",
-        reason="; ".join(blockers) if blockers else None,
-        reasons=explanation,
+        status=BlockStatus.OK.value,
+        decision=result.decision,
+        confidence=result.confidence,
+        headline=result.headline,
+        company_code=chosen.company_code if chosen else None,
+        tier_name=chosen.tier_name if chosen else None,
+        expected_profit=to_major(chosen.expected_profit_minor) if chosen else None,
+        expected_net=to_major(chosen.expected_net_minor) if chosen else None,
+        net_raw_alternative=raw_block.net_raw_sale_value,
+        roi_pct=chosen.roi_pct if chosen else None,
+        probability_of_profit=chosen.probability_of_profit if chosen else None,
+        probability_of_target_profit=chosen.probability_of_target if chosen else {},
+        minimum_profitable_grade=chosen.minimum_profitable_grade if chosen else None,
+        downside=to_major(chosen.downside_minor) if chosen else None,
+        upside=to_major(chosen.upside_minor) if chosen else None,
+        opportunity_score=chosen.opportunity_score if chosen else None,
+        score_parts=chosen.score_parts if chosen else {},
+        grading_cost=to_major(chosen.cost_minor) if chosen else None,
+        # The batch the *quoted* numbers assume, which is not always the one
+        # asked for: "worth grading, but not on its own" prices a fuller
+        # submission, and saying 1 next to that cost would be a lie.
+        assumed_batch_size=chosen.batch_size if chosen else batch_size,
+        # Travels with the figures because below 1.0 they are conditional: an
+        # expected profit computed over 13% of the outcomes is what you get *if*
+        # the card lands on the one grade anybody has sold.
+        coverage=chosen.coverage if chosen else 0.0,
+        review_in_days=result.review_in_days,
+        alternative=_outcome_out(result.alternative, currency) if result.alternative else None,
+        alternative_note=result.alternative_note,
+        reasons=reasons,
     )
 
 

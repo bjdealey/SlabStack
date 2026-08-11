@@ -129,28 +129,60 @@ cheapest is not best.
 
 ---
 
-## Phase 5 — Decision engine ← next
+## Phase 5 — Decision engine ✅
 
-**Build:**
+The question the application exists to answer, in `app/services/decision.py` and
+`app/services/portfolio.py`.
 
-1. Expected value: `Σ P(grade) × net_value(grade)`, per company and tier.
-2. Minimum profitable grade.
-3. Expected profit and ROI against the raw net alternative.
-4. Probability of profit, and of profit above £25 / £50 / £100.
-5. Downside (worst reasonable outcome) and upside.
-6. The composite Grading Opportunity Score, weighted by the user's configurable weights.
-7. The decision itself, and the liquidity-aware tie-break: when CGC shows more theoretical profit
-   but PSA is far more liquid, recommend PSA **and say why** — surfacing the alternative rather
-   than hiding it.
-8. Risk profiles (conservative / balanced / aggressive) shifting the thresholds.
+- **Expected value per route** — `Σ P(grade) × net(grade)`, for every usable (company, tier)
+  pair. Profit is measured against **selling the card raw today**, not against zero, because that
+  is the alternative you actually have.
+- **Minimum profitable grade**, and how often the card comes back at or above it — a question
+  about the grade, so it is answered over the whole distribution whether or not that grade has
+  ever sold.
+- **Probability of profit**, and of clearing £25 / £50 / £100.
+- **Downside and upside** as percentiles of the outcome distribution rather than the worst and
+  best grades on the ladder: a one-per-cent chance of a 3 is a tail, not a forecast.
+- **The Grading Opportunity Score** — profitability, grade odds, liquidity, trend and risk, each
+  0–10, weighted by settings you control, reported with its components so it can be argued with.
+- **The decision**, plus the liquidity-aware tie-break: the richest route on paper is not always
+  the one to take, and the one that loses is surfaced with the reason it lost (§26).
+- **`grade_if_batch_filled`** — the card is re-costed at each tier's own minimum, so "not worth
+  grading" and "not worth grading *on its own*" stop being the same answer.
+- **Risk tolerance** shifts the thresholds and which percentile counts as the downside. It never
+  changes the arithmetic: the expected value is the same number for everyone.
+- **`GET /api/collection/decisions`** runs the engine across the collection and returns a ranked
+  list. It is a separate call from the summary because it costs ~20 ms per card, and a dashboard
+  that blocks for nine seconds is a dashboard nobody waits for.
 
-**Watch for:** the spec's core principle. Optimise realisable, risk-adjusted profit — not
-theoretical card value. A recommendation that ignores liquidity is a recommendation to hold an
-unsellable slab.
+**Coverage is the honest part.** Grades with no sales behind them are *unknown*, not worthless.
+Expectations renormalise over the outcomes that can be priced and report what share that was;
+probabilities deliberately do **not** — an unpriced grade counts against P(profit), because
+"profitable 100% of the time" and "100% of the 13% we can price" are different claims and only one
+of them is what a reader hears.
+
+**Learned the hard way, twice:**
+
+*P(profit) renormalised over coverage first.* A card with one priced grade out of six read
+"P(profit) 100%" — technically the conditional probability, practically a lie. Making it
+unconditional flipped that card from Grade to Hold, correctly, and forced a second fix: the reason
+then had to distinguish "this card does not grade well enough" from "we cannot see enough of the
+outcomes to say", because those need opposite actions and blaming the card for a gap in your data
+is the wrong answer.
+
+*A batched quote wore the wrong batch size.* At `batch_size=1` the engine correctly answered
+"worth grading, but not on its own" and quoted the batched cost — £20.20 — beside `assumed_batch_size: 1`.
+The number was right and the label made it a lie. A route now carries the submission it was
+costed against, and the recommendation reports that rather than what you asked for.
+
+**`make parity`** runs both the server engine and the browser port over the same cases and compares
+every field. The demo is a hand-maintained port, so it can drift without anything failing to
+compile — this is what notices. It has already caught a real one: the two rendered negative money
+differently.
 
 ---
 
-## Phase 6 — Submission optimiser
+## Phase 6 — Submission optimiser ← next
 
 **Build:** batch creation and drag-and-drop, whole-collection optimisation against tier minimums
 and value ceilings, membership break-even, shared-cost allocation across a real batch, and the

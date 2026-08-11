@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.money import allocate, apply_pct, to_major, to_minor
+from app.money import allocate, apply_pct, format_money, to_major, to_minor
 
 
 @pytest.mark.parametrize(
@@ -47,3 +47,17 @@ class TestAllocate:
 
     def test_no_cards(self):
         assert allocate(500, []) == []
+
+
+class TestFormatMoney:
+    def test_the_sign_goes_outside_the_symbol(self):
+        """A hyphen after the symbol is not how anyone writes money, and the UI agrees."""
+        assert format_money(-1410) == "−£14.10"
+        assert format_money(1410) == "£14.10"
+
+    def test_nothing_known_is_a_dash_not_a_zero(self):
+        assert format_money(None) == "—"
+        assert format_money(0) == "£0.00"
+
+    def test_a_currency_with_no_symbol_still_reads_correctly(self):
+        assert format_money(-2500, "CAD") == "−25.00 CAD"

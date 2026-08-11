@@ -297,19 +297,40 @@ class OutcomeRow(ApiModel):
 
 
 class ExpectedOutcome(ApiModel):
+    """What one grading route is expected to produce, and how sure that is."""
+
     company_code: str
     tier_name: str | None = None
+    grading_cost: float | None = None
     expected_gross: float | None = None
     expected_net: float | None = None
-    expected_profit: float | None = None
-    roi_pct: float | None = None
+    expected_profit: float | None = Field(
+        default=None,
+        description="Probability-weighted profit *over selling the card raw today*.",
+    )
+    roi_pct: float | None = Field(
+        default=None, description="Expected profit as a percentage of the grading fee."
+    )
     probability_of_profit: float | None = None
     probability_of_target_profit: dict[str, float] = Field(default_factory=dict)
     minimum_profitable_grade: float | None = None
-    downside: float | None = None
-    upside: float | None = None
-    liquidity_score: float | None = None
+    probability_at_or_above_minimum: float | None = None
+    downside: float | None = Field(
+        default=None,
+        description="Profit at a low percentile of the outcomes — not the worst grade on the ladder.",
+    )
+    upside: float | None = Field(default=None, description="Profit at the 90th percentile.")
+    liquidity_score: float | None = Field(
+        default=None, description="How readily this grader's slab of this card would sell."
+    )
     opportunity_score: float | None = None
+    score_parts: dict[str, float] = Field(default_factory=dict)
+    coverage: float = Field(
+        default=0.0,
+        description="Share of the grade distribution with sales behind it. The rest is unknown.",
+    )
+    confidence: str = Confidence.NONE.value
+    notes: list[str] = Field(default_factory=list)
     rows: list[OutcomeRow] = Field(default_factory=list)
 
 
@@ -328,6 +349,26 @@ class RecommendationBlock(EvaluationBlock):
     probability_of_profit: float | None = None
     minimum_profitable_grade: float | None = None
     opportunity_score: float | None = None
+    score_parts: dict[str, float] = Field(default_factory=dict)
+    expected_net: float | None = None
+    net_raw_alternative: float | None = Field(
+        default=None, description="What selling it raw would net — the bar grading has to clear."
+    )
+    downside: float | None = None
+    upside: float | None = None
+    probability_of_target_profit: dict[str, float] = Field(default_factory=dict)
+    grading_cost: float | None = None
+    assumed_batch_size: int = 1
+    coverage: float = Field(
+        default=0.0,
+        description=(
+            "Share of the likely grades with sales behind them. Below 1.0 the expected "
+            "figures are conditional on landing on a priced grade, and must be read as such."
+        ),
+    )
+    review_in_days: int | None = Field(
+        default=None, description="Set on a Hold: when to look at this card again (§33)."
+    )
     alternative: ExpectedOutcome | None = Field(
         default=None,
         description="A route with better headline economics that was not chosen, and why (§26).",

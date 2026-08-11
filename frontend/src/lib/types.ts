@@ -555,9 +555,22 @@ export interface GradingOptionsBlock extends EvaluationBlock {
   cheapest_available_cost: number | null
 }
 
+export interface OutcomeRow {
+  grade: number
+  label: string
+  probability: number
+  gross_value: number | null
+  net_value: number | null
+  profit: number | null
+}
+
+/** The five components the opportunity score is built from, each 0-10. */
+export type ScoreParts = Record<string, number>
+
 export interface ExpectedOutcome {
   company_code: string
   tier_name: string | null
+  grading_cost: number | null
   expected_gross: number | null
   expected_net: number | null
   expected_profit: number | null
@@ -565,18 +578,17 @@ export interface ExpectedOutcome {
   probability_of_profit: number | null
   probability_of_target_profit: Record<string, number>
   minimum_profitable_grade: number | null
+  probability_at_or_above_minimum: number | null
   downside: number | null
   upside: number | null
   liquidity_score: number | null
   opportunity_score: number | null
-  rows: {
-    grade: number
-    label: string
-    probability: number
-    gross_value: number | null
-    net_value: number | null
-    profit: number | null
-  }[]
+  score_parts: ScoreParts
+  /** Share of the grade distribution with sales behind it. The rest is unknown. */
+  coverage: number
+  confidence: Confidence
+  notes: string[]
+  rows: OutcomeRow[]
 }
 
 export interface RecommendationBlock extends EvaluationBlock {
@@ -590,6 +602,22 @@ export interface RecommendationBlock extends EvaluationBlock {
   probability_of_profit: number | null
   minimum_profitable_grade: number | null
   opportunity_score: number | null
+  score_parts: ScoreParts
+  expected_net: number | null
+  /** What selling it raw would net — the bar grading has to clear. */
+  net_raw_alternative: number | null
+  downside: number | null
+  upside: number | null
+  probability_of_target_profit: Record<string, number>
+  grading_cost: number | null
+  /** The submission the quoted cost assumes, which is not always the one asked for. */
+  assumed_batch_size: number
+  /**
+   * Share of the likely grades with sales behind them. Below 1.0 every expected
+   * figure above is conditional on landing on a priced grade — the UI must say so.
+   */
+  coverage: number
+  review_in_days: number | null
   alternative: ExpectedOutcome | null
   alternative_note: string | null
   is_user_override: boolean
@@ -610,6 +638,7 @@ export interface CardEvaluation {
   grading_options: GradingOptionsBlock
   expected_outcomes: EvaluationBlock & { outcomes: ExpectedOutcome[] }
   recommendation: RecommendationBlock
+
   explanation: ExplanationItem[]
   blockers: string[]
   data_confidence: Confidence
@@ -646,6 +675,45 @@ export interface CollectionSummary {
   readiness: { key: string; label: string; count: number; total: number; action: string }[]
   market_sales_stored: number
   priced_tiers_configured: number
+}
+
+/** One card's verdict, flattened for a ranked list. */
+export interface Opportunity {
+  card_id: string
+  name: string
+  set_label: string | null
+  decision: Decision
+  headline: string
+  confidence: Confidence
+  company_code: string | null
+  tier_name: string | null
+  expected_profit: number | null
+  roi_pct: number | null
+  probability_of_profit: number | null
+  opportunity_score: number | null
+  grading_cost: number | null
+  net_raw_alternative: number | null
+  /** Below 1.0 the profit and ROI are conditional on landing a priced grade. */
+  coverage: number
+  is_user_override: boolean
+}
+
+export interface CollectionDecisions {
+  status: BlockStatus
+  reason: string | null
+  currency: string
+  /** How many cards the engine actually ran over — always read next to the totals. */
+  analysed: number
+  total_cards: number
+  skipped_not_ready: number
+  truncated: boolean
+  batch_size: number
+  expected_profit: number | null
+  potential_graded_value: number | null
+  potential_uplift: number | null
+  total_grading_cost: number | null
+  counts: Partial<Record<Decision, number>>
+  opportunities: Opportunity[]
 }
 
 export interface Facets {

@@ -1,4 +1,4 @@
-.PHONY: help install dev api ui test lint check schema migrate clean
+.PHONY: help install dev api ui test lint check parity schema migrate clean
 
 VENV := backend/.venv
 PY   := $(VENV)/bin/python
@@ -11,6 +11,7 @@ help:
 	@echo "  make ui        Run the UI on 127.0.0.1:5173"
 	@echo "  make test      Backend tests"
 	@echo "  make lint      Backend lint + frontend typecheck"
+	@echo "  make parity    Check the demo engine still agrees with the server"
 	@echo "  make check     Everything CI would run"
 	@echo "  make schema    Regenerate docs/schema.sql from the models"
 	@echo "  make migrate   Apply Alembic migrations"
@@ -34,7 +35,17 @@ lint:
 	cd backend && ../$(VENV)/bin/ruff check .
 	cd frontend && npm run typecheck
 
-check: test lint
+# The demo is a hand-maintained port of the backend engines, so it can drift
+# without anything failing to compile. This is what notices.
+parity:
+	cd frontend && ./node_modules/.bin/esbuild --bundle --platform=node --format=esm \
+		--alias:@=$(CURDIR)/frontend/src \
+		--outfile=$(CURDIR)/tools/parity/.demo.mjs $(CURDIR)/tools/parity/demo.ts >/dev/null
+	node tools/parity/.demo.mjs > tools/parity/.demo.json
+	$(PY) tools/parity/server.py > tools/parity/.server.json
+	$(PY) tools/parity/compare.py
+
+check: test lint parity
 	cd frontend && npm run build
 
 schema:
