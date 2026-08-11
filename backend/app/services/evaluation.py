@@ -22,16 +22,25 @@ from app.enums import (
     BlockStatus,
     Confidence,
     Decision,
+    DeclaredValueSource,
     PredictionKind,
     PredictionSource,
     Severity,
     TrendDirection,
 )
-from app.models import Card, DataSource, GradingCompany, MarketPrice, MarketSale
+from app.models import (
+    Card,
+    DataSource,
+    GradingCompany,
+    MarketPrice,
+    MarketSale,
+    SellingCostProfile,
+)
 from app.money import format_money, to_major, to_minor
 from app.schemas.evaluation import (
     ENGINE_VERSION,
     CardEvaluation,
+    CompanyBestCase,
     CompanyGradePrediction,
     ConditionBlock,
     ConditionScoreOut,
@@ -44,6 +53,7 @@ from app.schemas.evaluation import (
     LiquidityBlock,
     MarketBlock,
     MarketValueRow,
+    NetValueRow,
     RawBlock,
     RecommendationBlock,
     TrendBlock,
@@ -51,6 +61,7 @@ from app.schemas.evaluation import (
 from app.services import (
     cards_service,
     condition_service,
+    economics,
     market_service,
     prediction_service,
     predictions,
@@ -109,7 +120,12 @@ def _set_label(card: Card) -> str | None:
     return card.set_name or card.set_code
 
 
-def _build_raw_block(card: Card, currency: str, market_raw: MarketPrice | None) -> RawBlock:
+def _build_raw_block(
+    card: Card,
+    currency: str,
+    market_raw: MarketPrice | None,
+    profile: SellingCostProfile | None = None,
+) -> RawBlock:
     market_value = None
     if market_raw is not None:
         # The user's own number wins, then the realistic-sale estimate, then the
@@ -123,6 +139,10 @@ def _build_raw_block(card: Card, currency: str, market_raw: MarketPrice | None) 
     user_value = to_major(card.user_raw_value_minor)
     best = user_value if user_value is not None else market_value
     source = "user_override" if user_value is not None else ("market" if market_value is not None else None)
+
+    # Selling it raw is the alternative every grading decision is measured
+    # against, so it has to be netted the same way a graded sale is.
+    net_raw = economics.net_sale_value(to_minor(best), profile, graded=False)
 
     return RawBlock(
         status=BlockStatus.OK.value,
@@ -139,8 +159,7 @@ def _build_raw_block(card: Card, currency: str, market_raw: MarketPrice | None) 
         market_raw_value=market_value,
         best_raw_value=best,
         raw_value_source=source,
-        # Needs the selling-cost engine, which lands with the economics phase.
-        net_raw_sale_value=None,
+        net_raw_sale_value=to_major(net_raw.net_minor) if net_raw else None,
     )
 
 
@@ -336,11 +355,87 @@ def _build_grade_prediction_block(
     )
 
 
-def _build_grading_options_block(db: Session, card: Card, settings_values: dict) -> GradingOptionsBlock:
-    """Which grading routes exist at all, from configuration alone.
+def _headline_probabilities(block: GradePredictionBlock) -> tuple[dict[float, float] | None, str | None]:
+    """The distribution to value a declared value against, and whose ladder it is."""
+    if not block.by_company:
+        return None, None
+    company = block.by_company[0]
+    if not company.probabilities:
+        return None, None
+    return (
+        {item.grade: item.probability for item in company.probabilities},
+        company.company_code,
+    )
 
-    Costing an option needs a declared value, which needs market data — so
-    Phase 1 reports availability and blockers, not prices.
+
+def _best_case_per_company(
+    options: list[GradingOption],
+    net_rows: list[NetValueRow],
+    raw_net: NetValueRow | None,
+) -> list[CompanyBestCase]:
+    """The best outcome each company could produce, priced in its own slabs.
+
+    Strictly within a company: the cheapest tier *that company* offers, against
+    the best-netting grade *that company* has sales data for. Pairing ACE's fee
+    with PSA's slab price would describe a route that does not exist.
+    """
+    results: list[CompanyBestCase] = []
+    by_company: dict[str, list[GradingOption]] = {}
+    for option in options:
+        by_company.setdefault(option.company_code, []).append(option)
+
+    for code, group in by_company.items():
+        usable = [item for item in group if item.available and item.total_cost is not None]
+        row = CompanyBestCase(company_id=group[0].company_id, company_code=code)
+
+        if not usable:
+            row.reason = f"No usable {code} tier for this card."
+            results.append(row)
+            continue
+
+        cheapest = min(usable, key=lambda item: item.total_cost or float("inf"))
+        row.tier_name = cheapest.tier_name
+        row.grading_cost = cheapest.total_cost
+
+        owned = [
+            item
+            for item in net_rows
+            if item.is_graded and item.grade_label.split(" ")[0].upper() == code.upper()
+        ]
+        if not owned:
+            row.reason = f"No {code} sales stored, so a {code} slab cannot be priced."
+            results.append(row)
+            continue
+
+        best = max(owned, key=lambda item: item.net or float("-inf"))
+        row.best_grade_label = best.grade_label
+        row.best_grade = best.grade
+        row.best_net = best.net
+        if best.net is not None and raw_net is not None and raw_net.net is not None:
+            row.upside_vs_raw = round(best.net - raw_net.net - (cheapest.total_cost or 0), 2)
+        results.append(row)
+
+    results.sort(key=lambda item: item.upside_vs_raw if item.upside_vs_raw is not None else -1e9,
+                 reverse=True)
+    return results
+
+
+def _build_grading_options_block(
+    db: Session,
+    card: Card,
+    settings_values: dict,
+    *,
+    summary: market_service.MarketSummary,
+    grade_block: GradePredictionBlock,
+    currency: str,
+    batch_size: int | None = None,
+) -> GradingOptionsBlock:
+    """What each grading route would actually cost this card.
+
+    Costing a single card means assuming a submission around it, because
+    shipping and insurance belong to the parcel rather than the card. The
+    assumed batch size travels with every figure, so "£20.60 per card" is never
+    read without "if you send twenty-five".
     """
     wanted = settings_values.get("default_grading_company_codes") or []
     companies = list(
@@ -353,26 +448,58 @@ def _build_grading_options_block(db: Session, card: Card, settings_values: dict)
     if wanted:
         companies = [company for company in companies if company.code in wanted] or companies
 
+    probabilities, company_code = _headline_probabilities(grade_block)
+    declared = economics.suggest_declared_value(
+        card, prices=summary.prices, probabilities=probabilities, company_code=company_code
+    )
+    if card.user_declared_value_minor is not None:
+        declared = economics.DeclaredValue(
+            value_minor=card.user_declared_value_minor,
+            source=DeclaredValueSource.USER.value,
+            confidence=Confidence.HIGH.value,
+            basis="Your own figure. The engine's suggestion is kept alongside it, not replaced.",
+        )
+
+    assumptions = economics.SubmissionAssumptions.from_settings(
+        settings_values, batch_size=batch_size or 1
+    )
+    profile = economics.default_profile(db)
+
     options: list[GradingOption] = []
     for company in companies:
-        priced_tiers = [tier for tier in company.tiers if tier.active and tier.price_minor > 0]
-        if not priced_tiers:
+        tiers = economics.eligible_tiers(
+            company,
+            declared_value_minor=declared.value_minor,
+            batch_size=assumptions.batch_size,
+            today=date.today(),
+        )
+        if not tiers:
             options.append(
                 GradingOption(
                     company_id=company.id,
                     company_code=company.code,
                     company_name=company.name,
                     currency=company.currency,
+                    declared_value=to_major(declared.value_minor),
                     available=False,
                     blockers=[
-                        f"No priced tier configured for {company.code}. "
+                        f"No active tier configured for {company.code}. "
                         "Add current pricing in Settings → Grading."
                     ],
                 )
             )
             continue
 
-        for tier in sorted(priced_tiers, key=lambda t: (t.sort_order, t.price_minor)):
+        for tier, blockers in tiers:
+            costing = economics.cost_for_tier(
+                tier,
+                company,
+                declared_value_minor=declared.value_minor,
+                assumptions=assumptions,
+                blockers=blockers,
+            )
+            cost = costing.cost
+            priced = tier.price_minor > 0
             options.append(
                 GradingOption(
                     company_id=company.id,
@@ -381,27 +508,103 @@ def _build_grading_options_block(db: Session, card: Card, settings_values: dict)
                     tier_id=tier.id,
                     tier_name=tier.tier_name,
                     currency=tier.currency,
-                    grading_fee=to_major(tier.price_minor),
+                    declared_value=to_major(declared.value_minor),
+                    base_fee=to_major(cost.base_fee_minor) if priced else None,
+                    membership_discount=to_major(cost.membership_discount_minor) or None,
+                    grading_fee=to_major(cost.grading_fee_minor) if priced else None,
+                    per_card_fees=to_major(cost.per_card_fees_minor) or None,
+                    declared_value_fee=to_major(cost.declared_value_fee_minor) or None,
+                    allocated_overhead=to_major(cost.allocated_overhead_minor),
+                    # An unpriced tier gets no total: costing it at the shared
+                    # overhead alone would read as a cheap route.
+                    total_cost=to_major(cost.total_minor) if priced else None,
+                    shared_total=to_major(cost.shared_total_minor) or None,
+                    assumed_batch_size=assumptions.batch_size,
+                    membership_code=costing.membership_code,
                     turnaround_days=tier.turnaround_days,
                     minimum_cards=tier.minimum_cards,
                     requires_batch=tier.minimum_cards > 1,
                     membership_required=tier.membership_required,
-                    available=True,
-                    blockers=[],
+                    available=costing.available,
+                    blockers=costing.blockers,
                 )
             )
 
-    status = BlockStatus.PARTIAL.value if options else BlockStatus.INSUFFICIENT_DATA.value
+    nets = economics.net_by_grade(summary, profile)
+    net_rows = [
+        NetValueRow(
+            grade_label=label,
+            grade=next(
+                (row.grade for row in summary.prices if row.grade_label == label), None
+            ),
+            gross=to_major(value.gross_minor),
+            shipping_income=to_major(value.shipping_income_minor) or None,
+            platform_fee=to_major(value.platform_fee_minor) or None,
+            payment_fee=to_major(value.payment_fee_minor) or None,
+            listing_fee=to_major(value.listing_fee_minor) or None,
+            postage_cost=to_major(value.postage_cost_minor) or None,
+            packaging_cost=to_major(value.packaging_cost_minor) or None,
+            total_costs=to_major(value.total_costs_minor),
+            net=to_major(value.net_minor),
+            is_graded=value.is_graded,
+        )
+        for label, value in sorted(nets.items(), key=lambda item: item[0] != "raw")
+    ]
+
+    available = [option for option in options if option.available and option.total_cost is not None]
+    cheapest = min((option.total_cost for option in available), default=None)
+    raw_net_row = next((row for row in net_rows if not row.is_graded), None)
+    best_case = _best_case_per_company(options, net_rows, raw_net_row)
+
+    reasons: list[str] = []
+    if not options:
+        status = BlockStatus.INSUFFICIENT_DATA.value
+        reasons.append("No active grading company is configured.")
+    elif declared.value_minor is None:
+        status = BlockStatus.PARTIAL.value
+        reasons.append(
+            "Costs shown without a declared value, so tier ceilings and any percentage-of-value "
+            "fees are not applied. Add comparable sales or your own estimate."
+        )
+    elif profile is None:
+        status = BlockStatus.PARTIAL.value
+        reasons.append(
+            "No selling profile is configured, so net proceeds cannot be worked out. "
+            "Add one in Settings → Selling."
+        )
+    elif not available:
+        status = BlockStatus.PARTIAL.value
+        reasons.append("No tier is usable for this card as things stand — see the reasons below.")
+    else:
+        status = BlockStatus.OK.value
+
+    if assumptions.allocation_note:
+        reasons.append(assumptions.allocation_note)
+    if declared.confidence in {Confidence.NONE.value, Confidence.LOW.value} and options:
+        reasons.append(
+            f"Declared value is a {_confidence_phrase(declared.confidence)} estimate, and it "
+            "drives tier eligibility — check it before submitting."
+        )
+
     return GradingOptionsBlock(
         status=status,
-        phase=PHASE_ECONOMICS,
-        reason=(
-            "Tier availability only. Declared value, batch allocation and total cost per card "
-            "arrive with the grading-economics engine."
-            if options
-            else "No active grading company with a priced tier is configured."
-        ),
+        phase=None if status == BlockStatus.OK.value else PHASE_ECONOMICS,
+        reason=" ".join(reasons) or None,
+        currency=currency,
         options=options,
+        declared_value=to_major(declared.value_minor),
+        declared_value_source=declared.source,
+        declared_value_confidence=declared.confidence,
+        declared_value_basis=declared.basis,
+        declared_value_coverage=declared.coverage,
+        assumed_batch_size=assumptions.batch_size,
+        allocation_method=assumptions.allocation_method,
+        allocation_note=assumptions.allocation_note,
+        selling_profile_code=profile.code if profile else None,
+        selling_profile_name=profile.name if profile else None,
+        net_values=net_rows,
+        best_case=best_case,
+        cheapest_available_cost=cheapest,
     )
 
 
@@ -603,7 +806,13 @@ def _data_confidence(
     return min(parts, key=_CONFIDENCE_ORDER.index)
 
 
-def evaluate_card(db: Session, card: Card) -> CardEvaluation:
+def evaluate_card(db: Session, card: Card, *, batch_size: int | None = None) -> CardEvaluation:
+    """``batch_size`` is how many cards to assume share a submission's shipping.
+
+    Defaults to one, which is the honest worst case: a single card carries the
+    whole £40 of postage. The UI lets the user try other sizes, because the
+    same card can be unprofitable alone and clearly worth grading in a batch.
+    """
     settings_values = settings_service.get_all(db)
     currency = settings_values.get("currency", "GBP")
 
@@ -614,11 +823,19 @@ def evaluate_card(db: Session, card: Card) -> CardEvaluation:
         currency=currency,
     )
 
-    raw_block = _build_raw_block(card, currency, summary.raw)
+    profile = economics.default_profile(db)
+    raw_block = _build_raw_block(card, currency, summary.raw, profile)
     condition_block = _build_condition_block(db, card)
-    options_block = _build_grading_options_block(db, card, settings_values)
-
     grade_block = _build_grade_prediction_block(db, card, settings_values)
+    options_block = _build_grading_options_block(
+        db,
+        card,
+        settings_values,
+        summary=summary,
+        grade_block=grade_block,
+        currency=currency,
+        batch_size=batch_size,
+    )
 
     market_block = _build_market_block(db, summary, currency)
     liquidity_block = _build_liquidity_block(summary)
@@ -730,19 +947,7 @@ def _explain(
 
     items.extend(_market_explanation(market_block, summary, blockers))
 
-    available = [option for option in options_block.options if option.available]
-    if available:
-        companies = sorted({option.company_code for option in available})
-        items.append(
-            ExplanationItem(
-                kind="pass",
-                text=f"Grading tiers configured for {', '.join(companies)}.",
-                detail=f"{len(available)} priced tier(s) available.",
-            )
-        )
-    else:
-        items.append(ExplanationItem(kind="fail", text="No priced grading tier configured."))
-        blockers.append("Enter current pricing for at least one grading company.")
+    items.extend(_economics_explanation(options_block, market_block, blockers))
 
     if card.user_raw_value_minor is None and card.purchase_price_minor is None:
         items.append(
@@ -871,6 +1076,110 @@ def _market_explanation(
                     else None
                 ),
             )
+        )
+
+    return items
+
+
+def _economics_explanation(
+    options: GradingOptionsBlock,
+    market: MarketBlock,
+    blockers: list[str],
+) -> list[ExplanationItem]:
+    """The money half of the "Why?" panel: what grading costs, and what a sale keeps."""
+    items: list[ExplanationItem] = []
+    currency = options.currency
+
+    available = [option for option in options.options if option.available]
+    if not available:
+        items.append(ExplanationItem(kind="fail", text="No usable grading tier for this card."))
+        blockers.append(
+            "Enter current pricing for at least one grading company, or check the tier "
+            "restrictions listed under Grading routes."
+        )
+    else:
+        cheapest = min(available, key=lambda option: option.total_cost or float("inf"))
+        batch = (
+            f" in a batch of {cheapest.assumed_batch_size}"
+            if cheapest.assumed_batch_size > 1
+            else " sending it on its own"
+        )
+        items.append(
+            ExplanationItem(
+                kind="pass",
+                text=(
+                    f"Cheapest route {cheapest.company_code} {cheapest.tier_name} at "
+                    f"{format_money(to_minor(cheapest.total_cost), currency)}{batch}."
+                ),
+                detail=(
+                    f"{format_money(to_minor(cheapest.grading_fee), currency)} fee plus "
+                    f"{format_money(to_minor(cheapest.allocated_overhead), currency)} share of "
+                    "shipping and insurance."
+                ),
+            )
+        )
+
+    if options.declared_value is not None:
+        source = "yours" if options.declared_value_source == "user" else "estimated"
+        items.append(
+            ExplanationItem(
+                kind="pass" if options.declared_value_confidence in _GOOD_CONFIDENCE else "warn",
+                text=(
+                    f"Declared value {format_money(to_minor(options.declared_value), currency)} "
+                    f"({source}, {_confidence_phrase(options.declared_value_confidence)})."
+                ),
+                detail=options.declared_value_basis,
+            )
+        )
+
+    raw_net = next((row for row in options.net_values if not row.is_graded), None)
+    if raw_net is not None and raw_net.net is not None:
+        kept = raw_net.net / raw_net.gross if raw_net.gross else None
+        items.append(
+            ExplanationItem(
+                kind="info",
+                text=(
+                    f"Selling it raw nets {format_money(to_minor(raw_net.net), currency)} "
+                    f"after fees and postage."
+                ),
+                detail=(
+                    f"You keep {kept:.0%} of the sale price on "
+                    f"{options.selling_profile_name}."
+                    if kept is not None
+                    else None
+                ),
+            )
+        )
+
+    # Best case, strictly within one company: an ACE 10 does not sell for what
+    # a PSA 10 sells for, so the fee and the slab price must come from the same
+    # grader or the route described does not exist.
+    priced = [row for row in options.best_case if row.upside_vs_raw is not None]
+    if priced:
+        best = priced[0]
+        items.append(
+            ExplanationItem(
+                kind="info",
+                text=(
+                    f"Best case {best.best_grade_label} nets "
+                    f"{format_money(to_minor(best.best_net), currency)} — "
+                    f"{format_money(to_minor(best.upside_vs_raw), currency)} over selling raw, "
+                    f"after {best.company_code} {best.tier_name} at "
+                    f"{format_money(to_minor(best.grading_cost), currency)}."
+                ),
+                detail=(
+                    "Best case only: it assumes the top grade you have "
+                    f"{best.company_code} sales data for. The probability-weighted figure "
+                    "arrives with the decision engine."
+                ),
+            )
+        )
+    elif options.best_case and market.status != BlockStatus.INSUFFICIENT_DATA.value:
+        missing = [row.company_code for row in options.best_case if row.best_net is None]
+        blockers.append(
+            "Add graded sales for "
+            + ", ".join(sorted(missing))
+            + " so the upside can be netted rather than guessed at."
         )
 
     return items

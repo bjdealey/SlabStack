@@ -187,6 +187,7 @@ CREATE TABLE cards (
 	purchase_date DATE, 
 	status VARCHAR(32) NOT NULL, 
 	user_raw_value_minor INTEGER, 
+	user_declared_value_minor INTEGER, 
 	decision_override VARCHAR(32), 
 	decision_override_reason TEXT, 
 	review_after DATE, 

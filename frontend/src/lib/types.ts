@@ -71,6 +71,7 @@ export interface Card {
   purchase_date: string | null
   status: string
   user_raw_value: number | null
+  user_declared_value: number | null
   decision_override: Decision | null
   decision_override_reason: string | null
   review_after: string | null
@@ -104,6 +105,7 @@ export interface CardWrite {
   purchase_date?: string | null
   status?: string
   user_raw_value?: number | null
+  user_declared_value?: number | null
   decision_override?: Decision | null
   decision_override_reason?: string | null
   review_after?: string | null
@@ -489,15 +491,68 @@ export interface GradingOption {
   tier_name: string | null
   currency: string
   declared_value: number | null
+  base_fee: number | null
+  membership_discount: number | null
   grading_fee: number | null
+  per_card_fees: number | null
+  declared_value_fee: number | null
   allocated_overhead: number | null
   total_cost: number | null
+  shared_total: number | null
+  assumed_batch_size: number
+  membership_code: string | null
   turnaround_days: number | null
   minimum_cards: number
   requires_batch: boolean
   membership_required: boolean
   available: boolean
   blockers: string[]
+}
+
+export interface NetValueRow {
+  grade_label: string
+  grade: number | null
+  gross: number | null
+  shipping_income: number | null
+  platform_fee: number | null
+  payment_fee: number | null
+  listing_fee: number | null
+  postage_cost: number | null
+  packaging_cost: number | null
+  total_costs: number | null
+  net: number | null
+  is_graded: boolean
+}
+
+/** The best a company could do, priced in its own slabs — never mixed across graders. */
+export interface CompanyBestCase {
+  company_id: string
+  company_code: string
+  tier_name: string | null
+  grading_cost: number | null
+  best_grade_label: string | null
+  best_grade: number | null
+  best_net: number | null
+  upside_vs_raw: number | null
+  reason: string | null
+}
+
+export interface GradingOptionsBlock extends EvaluationBlock {
+  options: GradingOption[]
+  currency: string
+  best_case: CompanyBestCase[]
+  declared_value: number | null
+  declared_value_source: string
+  declared_value_confidence: Confidence
+  declared_value_basis: string | null
+  declared_value_coverage: number | null
+  assumed_batch_size: number
+  allocation_method: string
+  allocation_note: string | null
+  selling_profile_code: string | null
+  selling_profile_name: string | null
+  net_values: NetValueRow[]
+  cheapest_available_cost: number | null
 }
 
 export interface ExpectedOutcome {
@@ -552,7 +607,7 @@ export interface CardEvaluation {
   market: MarketBlock
   liquidity: LiquidityBlock
   trend: TrendBlock
-  grading_options: EvaluationBlock & { options: GradingOption[] }
+  grading_options: GradingOptionsBlock
   expected_outcomes: EvaluationBlock & { outcomes: ExpectedOutcome[] }
   recommendation: RecommendationBlock
   explanation: ExplanationItem[]

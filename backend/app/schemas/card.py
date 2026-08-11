@@ -94,6 +94,14 @@ class CardWriteBase(ApiModel):
     purchase_date: date | None = None
     status: str = CardStatus.IN_COLLECTION.value
     user_raw_value: float | None = Field(default=None, ge=0)
+    user_declared_value: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "What to tell the grader this card is worth. Separate from the raw value: one "
+            "is what you would sell it for today, the other is what you insure the slab for."
+        ),
+    )
     decision_override: str | None = None
     decision_override_reason: str | None = None
     review_after: date | None = None
@@ -162,6 +170,14 @@ class CardUpdate(ApiModel):
     purchase_date: date | None = None
     status: str | None = None
     user_raw_value: float | None = Field(default=None, ge=0)
+    user_declared_value: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "What to tell the grader this card is worth. Separate from the raw value: one "
+            "is what you would sell it for today, the other is what you insure the slab for."
+        ),
+    )
     decision_override: str | None = None
     decision_override_reason: str | None = None
     review_after: date | None = None
@@ -221,6 +237,7 @@ class CardOut(ApiModel):
     purchase_date: date | None
     status: str
     user_raw_value: float | None
+    user_declared_value: float | None
     decision_override: str | None
     decision_override_reason: str | None
     review_after: date | None
@@ -270,6 +287,7 @@ class CardOut(ApiModel):
             purchase_date=card.purchase_date,
             status=card.status,
             user_raw_value=to_major(card.user_raw_value_minor),
+            user_declared_value=to_major(card.user_declared_value_minor),
             decision_override=card.decision_override,
             decision_override_reason=card.decision_override_reason,
             review_after=card.review_after,
@@ -299,6 +317,7 @@ class BulkCardCreate(ApiModel):
 MONEY_FIELDS: dict[str, str] = {
     "purchase_price": "purchase_price_minor",
     "user_raw_value": "user_raw_value_minor",
+    "user_declared_value": "user_declared_value_minor",
 }
 
 

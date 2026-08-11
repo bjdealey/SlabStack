@@ -355,10 +355,27 @@ for the rest. No block ever invents a number to look complete.
     "change_180d_pct": null, "change_365d_pct": null, "sample_size": 24
   },
 
-  "grading_options": {              // ✅ availability now, ⏳ costing in Phase 4
-    "status": "partial", "phase": 4, "reason": "Tier availability only…",
+  "grading_options": {              // ✅
+    "status": "ok", "phase": null, "reason": null,
+    "currency": "GBP",
+    "declared_value": 469.19,        // probability-weighted, not the top-grade value
+    "declared_value_source": "system",
+    "declared_value_confidence": "high",
+    "declared_value_basis": "Probability-weighted across the PSA grades with sales data…",
+    "declared_value_coverage": 1.0,
+    "assumed_batch_size": 25,        // shipping belongs to the parcel, not the card
+    "allocation_method": "equal",
+    "allocation_note": null,
+    "selling_profile_code": "ebay_uk",
+    "net_values": [ … ],             // net per grade — tier-independent, computed once
+    "best_case": [ … ],              // per grader: its own fee against its own slab price
+    "cheapest_available_cost": 24.10,
     "options": [{
       "company_id": "…", "company_code": "CGC", "company_name": "CGC Cards",
+      "base_fee": 19.0, "membership_discount": null, "grading_fee": 19.0,
+      "per_card_fees": null, "declared_value_fee": null,
+      "allocated_overhead": 6.10, "total_cost": 25.10,
+      "shared_total": 152.30, "assumed_batch_size": 25,
       "tier_id": "…", "tier_name": "Bulk", "currency": "GBP",
       "grading_fee": 16.8, "turnaround_days": 45,
       "minimum_cards": 25, "requires_batch": true, "membership_required": false,
@@ -577,6 +594,40 @@ Keys by category:
   `min_sales_high_confidence`, `min_sales_medium_confidence`
 
 Money-valued settings are in major units. `decision_score_weights` must total 100.
+
+---
+
+## Grading economics
+
+`GET /api/cards/{id}/evaluation?batch_size=N` costs the card as though it travelled in a
+submission of `N`. It defaults to **1** — the honest worst case, where one card carries the whole
+postage — and it changes which tiers are usable as well as what each one costs. The assumed size
+comes back on the block, so a per-card figure is never read without the batch it assumed.
+
+A tier is returned with the reasons it cannot be used rather than filtered out:
+
+```jsonc
+{
+  "company_code": "CGC", "tier_name": "Bulk",
+  "grading_fee": 16.80, "total_cost": 21.70,
+  "minimum_cards": 25, "requires_batch": true,
+  "available": false,
+  "blockers": [
+    "Declared value exceeds this tier's ceiling of £400.00 — a more expensive tier is required."
+  ]
+}
+```
+
+An unpriced tier returns `total_cost: null` and a blocker naming what to configure — never a
+total, because costing it at the shared overhead alone would read as a cheap route.
+
+`best_case` pairs each grader's own cheapest usable tier with the best-netting grade *that grader*
+has sales data for. A grader with no graded sales returns `best_net: null` and a `reason` rather
+than borrowing another grader's prices.
+
+`PATCH /api/cards/{id}` accepts `user_declared_value`. It is stored in its own column, separate
+from `user_raw_value` — one is what you would sell the card for today, the other is what you
+insure the slab for — and clearing it restores the engine's suggestion.
 
 ---
 

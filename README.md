@@ -12,7 +12,7 @@ no outbound network call in this build.
 
 ---
 
-## Status: Phases 1–3
+## Status: Phases 1–4
 
 | Delivered                                                                     |
 | ----------------------------------------------------------------------------- |
@@ -24,10 +24,12 @@ no outbound network call in this build.
 | **Grade probability model** — a distribution per grading company, with configurable defect rules |
 | **Sales import** — manual and CSV, deduplicated, with reversible exclusion filtering |
 | **Valuation, liquidity and trend** — every number carrying its own evidence   |
+| **Grading economics** — declared value, tier eligibility, cost per card at any batch size |
+| **Net sale value** per grade after fees and postage, so grading has something real to beat |
 | Configuration-driven grading companies, tiers, memberships and selling profiles |
 | `evaluate_card` — the decision envelope the whole UI renders                  |
 | React dashboard, collection view, card detail page, market panel and settings |
-| 289 backend tests, contract guards, clean lint, verified end-to-end in a browser |
+| 332 backend tests, contract guards, clean lint, verified end-to-end in a browser |
 
 Market data comes from sales you enter or import. Network provider adapters are **not** built:
 they need API credentials and each service's terms reviewed, so `POST /api/market/refresh` is the
@@ -203,7 +205,7 @@ One call returns everything needed to decide, and the UI only visualises it:
   "market": { … },            // raw + graded values, with sample size and confidence
   "liquidity": { … },         // score, band and sale counts, across every grade
   "trend": { … },             // direction per horizon, within one grade
-  "grading_options": { … },   // routes now, full costing in Phase 4
+  "grading_options": { … },   // declared value, eligibility, cost per card, net per grade
   "expected_outcomes": { … }, // Phase 5
   "recommendation": { … },    // Phase 5 (your overrides work today)
   "explanation": [ … ],       // the "Why?" panel
@@ -235,6 +237,11 @@ damage, customs, wrong printings and best-offer sales, and an IQR fence catches 
 but only once there are enough sales to draw one, because a fence drawn by five points is drawn by
 the points it is meant to judge. **Nothing is deleted:** every exclusion keeps its row, its reason
 and who made it, and is one click from being reversed.
+
+**No cross-grader arithmetic.** A best case pairs a grader's own fee with its own slab price. ACE
+is the cheapest to grade and a CGC slab is worth far more, so pairing the cheapest fee anywhere
+with the highest price anywhere describes a route that does not exist — and hides the real
+finding, which is that cheapest is not best.
 
 **No invented prices.** Grading tiers are seeded `active` only where the price can be attributed —
 CGC and ACE from the figures in the specification, flagged for you to verify. PSA ships as tier
