@@ -14,7 +14,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent / "backend"))
 
 from app.money import allocate  # noqa: E402
-from app.services import analytics, decision  # noqa: E402
+from app.services import analytics, calibration, decision  # noqa: E402
+from app.services.calibration import brier_score as analytics_brier  # noqa: E402
 
 
 def label_for(company_code: str, grade: float) -> str:
@@ -91,6 +92,34 @@ def run(case: dict) -> dict:
     }
 
 
+def run_scoring(case: dict) -> dict:
+    """The Brier score, which both sides implement alone."""
+    return {
+        "name": case["name"],
+        "brier": analytics_brier(case["probabilities"] or None, case["actual"]),
+    }
+
+
+def run_correction(case: dict) -> dict:
+    """The learned correction, as pure arithmetic over the signed errors."""
+    result = calibration.correction_from_errors(
+        [float(value) for value in case["errors"]],
+        company_code="CGC",
+        minimum_sample=case["minimumSample"],
+        max_offset=case["maxOffset"],
+        enabled=case["enabled"],
+    )
+    return {
+        "name": case["name"],
+        "sample_size": result.sample_size,
+        "grade_offset": result.grade_offset,
+        "spread_multiplier": result.spread_multiplier,
+        "applied": result.applied,
+        "confidence": result.confidence,
+        "reason": result.reason,
+    }
+
+
 def run_listing(case: dict) -> dict:
     """The suggested asking price, which is arithmetic both sides do alone."""
     asking, basis = analytics.suggested_listing_minor(
@@ -116,6 +145,8 @@ if __name__ == "__main__":
         json.dumps(
             {
                 "decisions": [run(case) for case in data["cases"]],
+                "scoring": [run_scoring(case) for case in data["scoring"]],
+                "corrections": [run_correction(case) for case in data["corrections"]],
                 "listings": [run_listing(case) for case in data["listings"]],
                 "allocations": [run_allocation(case) for case in data["allocations"]],
             },

@@ -187,6 +187,15 @@ export const SEED_CARDS: SeedCard[] = [
       review_after: '2026-09-10',
     },
     image: 'card-3.jpg',
+    condition: {
+      centering: {
+        front: { left: 53, right: 47, top: 49, bottom: 51 },
+        back: { left: 51, right: 49, top: 52, bottom: 48 },
+      },
+      front: none({ corner_tr: 'minor', edge_condition: 'minor' }) as never,
+      back: none({ whitening: 'minor' }) as never,
+      notes: 'Sleeved since pull. Slight softness top-right.',
+    },
   },
   {
     // Assessed and priced, but the slabs barely beat the raw card — the honest
@@ -223,6 +232,15 @@ export const SEED_CARDS: SeedCard[] = [
       purchase_price: 12,
       notes: 'Three copies — split before any of them goes in a submission.',
     },
+    condition: {
+      centering: {
+        front: { left: 50, right: 50, top: 52, bottom: 48 },
+        back: { left: 52, right: 48, top: 50, bottom: 50 },
+      },
+      front: none() as never,
+      back: none() as never,
+      notes: 'Assessed the best of the three.',
+    },
   },
   {
     card: {
@@ -235,6 +253,15 @@ export const SEED_CARDS: SeedCard[] = [
       purchase_price: 210,
       user_raw_value: 245,
     },
+    condition: {
+      centering: {
+        front: { left: 49, right: 51, top: 50, bottom: 50 },
+        back: { left: 50, right: 50, top: 51, bottom: 49 },
+      },
+      front: none({ scratches: 'minor' }) as never,
+      back: none() as never,
+      notes: 'Very clean. Faint surface scuff catches the light.',
+    },
   },
   {
     card: {
@@ -246,6 +273,15 @@ export const SEED_CARDS: SeedCard[] = [
       pokemon: 'Mew',
       purchase_price: 88,
       user_raw_value: 96,
+    },
+    condition: {
+      centering: {
+        front: { left: 51, right: 49, top: 50, bottom: 50 },
+        back: { left: 49, right: 51, top: 50, bottom: 50 },
+      },
+      front: none({ corner_br: 'minor' }) as never,
+      back: none({ whitening: 'minor' }) as never,
+      notes: 'Straight from a sleeve. One corner very slightly soft.',
     },
   },
   {

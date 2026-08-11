@@ -49,7 +49,7 @@ def main() -> int:
     problems: list[tuple[str, object, object]] = []
     total = 0
 
-    for section in ("decisions", "listings", "allocations"):
+    for section in ("decisions", "scoring", "corrections", "listings", "allocations"):
         left_rows = server.get(section, [])
         right_rows = demo.get(section, [])
         if len(left_rows) != len(right_rows):
@@ -67,6 +67,12 @@ def main() -> int:
             f"  {case['name']:<44} {case['decision']:<22} "
             f"score={route['opportunity_score']} coverage={route['coverage']}"
         )
+    for case in server.get("scoring", []):
+        brier = case["brier"]
+        print(f"  {case['name']:<44} {('brier ' + ('—' if brier is None else f'{brier:.4f}')):<22}")
+    for case in server.get("corrections", []):
+        mark = "applied" if case["applied"] else "measured only"
+        print(f"  {case['name']:<44} {mark:<22} offset={case['grade_offset']}")
     for case in server.get("listings", []):
         asking = case["asking_minor"]
         shown = "—" if asking is None else f"{asking / 100:.2f}"

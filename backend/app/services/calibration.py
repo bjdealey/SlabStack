@@ -51,6 +51,7 @@ __all__ = [
     "CompanyAccuracy",
     "brier_score",
     "calibration_for",
+    "correction_from_errors",
     "record_results_for_submission",
     "report",
 ]
@@ -433,36 +434,29 @@ class Calibration:
         return abs(self.grade_offset) < 1e-9 and abs(self.spread_multiplier - 1.0) < 1e-9
 
 
-def calibration_for(db: Session, company: GradingCompany) -> Calibration:
-    """What this grader's history says the model should do differently.
+def correction_from_errors(
+    errors: list[float],
+    *,
+    company_code: str,
+    company_id: str = "",
+    minimum_sample: int = DEFAULT_MINIMUM_SAMPLE,
+    max_offset: float = DEFAULT_MAX_OFFSET,
+    enabled: bool = True,
+) -> Calibration:
+    """The correction itself, as pure arithmetic over the signed errors.
 
-    The correction lands on the two parameters the model already has — where the
-    distribution is centred and how wide it is — rather than inventing a new
-    mechanism. That keeps it inspectable: a calibrated prediction is the same
-    model with a shifted centre, and the shift is a number you can read.
+    Split out from ``calibration_for`` so it can be compared against the browser
+    port over identical inputs without a database in the way — this is the part
+    where the two implementations could silently drift.
     """
-    values = settings_service.get_all(db)
-    minimum = int(values.get("calibration_minimum_sample", DEFAULT_MINIMUM_SAMPLE))
-    max_offset = float(values.get("calibration_max_offset", DEFAULT_MAX_OFFSET))
-    enabled = bool(values.get("calibration_enabled", True))
-
     result = Calibration(
-        company_id=company.id, company_code=company.code, minimum_sample=minimum
+        company_id=company_id, company_code=company_code, minimum_sample=minimum_sample
     )
-
-    rows = list(
-        db.scalars(select(PredictionResult).where(PredictionResult.company_id == company.id))
-    )
-    errors = [
-        row.actual_grade - row.predicted_likely_grade
-        for row in rows
-        if row.predicted_likely_grade is not None
-    ]
     result.sample_size = len(errors)
 
     if not errors:
         result.reason = (
-            f"No {company.code} results recorded yet, so there is nothing to learn from."
+            f"No {company_code} results recorded yet, so there is nothing to learn from."
         )
         return result
 
@@ -486,31 +480,31 @@ def calibration_for(db: Session, company: GradingCompany) -> Calibration:
         )
         return result
 
-    if len(errors) < minimum:
+    if len(errors) < minimum_sample:
         result.reason = (
-            f"{len(errors)} of the {minimum} results needed before a correction is applied. "
-            "A bias fitted to this few cards is noise, and correcting for noise makes the model "
-            "worse without saying so."
+            f"{len(errors)} of the {minimum_sample} results needed before a correction is "
+            "applied. A bias fitted to this few cards is noise, and correcting for noise makes "
+            "the model worse without saying so."
         )
         return result
 
     result.applied = True
     result.confidence = (
         Confidence.HIGH.value
-        if len(errors) >= minimum * 3
+        if len(errors) >= minimum_sample * 3
         else Confidence.MEDIUM.value
-        if len(errors) >= minimum * 2
+        if len(errors) >= minimum_sample * 2
         else Confidence.LOW.value
     )
     if result.is_identity:
         result.reason = (
-            f"{len(errors)} {company.code} result(s) and nothing to correct — predictions already "
+            f"{len(errors)} {company_code} result(s) and nothing to correct — predictions already "
             "track this grader."
         )
     else:
         moves = "up" if result.grade_offset > 0 else "down"
         result.reason = (
-            f"Learned from {len(errors)} {company.code} result(s): the centre moves {moves} by "
+            f"Learned from {len(errors)} {company_code} result(s): the centre moves {moves} by "
             f"{abs(result.grade_offset):.2f} grades"
             + (
                 f" and the range widens by {(result.spread_multiplier - 1) * 100:.0f}%."
@@ -519,6 +513,33 @@ def calibration_for(db: Session, company: GradingCompany) -> Calibration:
             )
         )
     return result
+
+
+def calibration_for(db: Session, company: GradingCompany) -> Calibration:
+    """What this grader's history says the model should do differently.
+
+    The correction lands on the two parameters the model already has — where the
+    distribution is centred and how wide it is — rather than inventing a new
+    mechanism. That keeps it inspectable: a calibrated prediction is the same
+    model with a shifted centre, and the shift is a number you can read.
+    """
+    values = settings_service.get_all(db)
+    rows = list(
+        db.scalars(select(PredictionResult).where(PredictionResult.company_id == company.id))
+    )
+    errors = [
+        row.actual_grade - row.predicted_likely_grade
+        for row in rows
+        if row.predicted_likely_grade is not None
+    ]
+    return correction_from_errors(
+        errors,
+        company_code=company.code,
+        company_id=company.id,
+        minimum_sample=int(values.get("calibration_minimum_sample", DEFAULT_MINIMUM_SAMPLE)),
+        max_offset=float(values.get("calibration_max_offset", DEFAULT_MAX_OFFSET)),
+        enabled=bool(values.get("calibration_enabled", True)),
+    )
 
 
 #: The spread the rules engine typically produces for a complete assessment.

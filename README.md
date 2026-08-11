@@ -12,7 +12,7 @@ no outbound network call in this build.
 
 ---
 
-## Status: Phases 1–6
+## Status: Phases 1–8 — feature complete
 
 | Delivered                                                                     |
 | ----------------------------------------------------------------------------- |
@@ -31,16 +31,21 @@ no outbound network call in this build.
 | React dashboard, collection view, card detail page, market panel and settings |
 | **Decision engine** — expected value per route, risk-adjusted, with the route that lost |
 | **Submission optimiser** — real batch costing, and a re-check that the plan still pays |
-| 444 backend tests, engine-parity checks and clean lint, run in CI on every pull request |
+| **Analytics** — ranked opportunities, a selling queue with a price to ask, submission ROI, nine saved cuts |
+| **Learning system** — your predictions marked against what came back, and the model corrected by it |
+| 495 backend tests, 46 engine-parity cases and clean lint, run in CI on every pull request |
 | Verified end-to-end in a browser each phase — most real bugs here were found that way |
 
 Market data comes from sales you enter or import. Network provider adapters are **not** built:
 they need API credentials and each service's terms reviewed, so `POST /api/market/refresh` is the
 one market endpoint still returning a `501` — and it says what does work without it.
 
-Blocks that need later engines report `not_implemented` or `insufficient_data` with the phase that
-delivers them and a reason you can act on. **Nothing returns an invented number.** See
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+Every phased engine has landed. The two endpoints still returning `501` wait on an external service
+rather than on code: `POST /api/market/refresh` needs a provider's credentials, and
+`POST /api/cards/identify` needs an identification provider. Both say what does work without them.
+
+Blocks with nothing behind them yet report `insufficient_data` with a reason you can act on.
+**Nothing returns an invented number.** See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ---
 

@@ -356,9 +356,24 @@ function observedSeverity(assessment: ConditionAssessment, field: string): strin
   return worst
 }
 
+/**
+ * `calibration` is what the user's own returned grades taught the model about
+ * this grader — plain numbers rather than an object, mirroring the server, so
+ * this stays a pure function of an assessment. Omitted means "learned nothing",
+ * which is right for a fresh store and for the physical prediction: calibration
+ * is measured against a grader and the physical question has none.
+ */
+export interface CalibrationInput {
+  offset: number
+  spreadMultiplier: number
+  sampleSize: number
+  note: string | null
+}
+
 function predictGrade(
   assessment: ConditionAssessment,
   company: GradingCompany | null,
+  calibration?: CalibrationInput,
 ): CompanyGradePrediction & { baseGrade: number } {
   const entries = Object.entries(MODEL.weights)
     .map(([key, weight]) => {
@@ -382,10 +397,13 @@ function predictGrade(
       ? Math.sqrt(scores.reduce((sum, s) => sum + (s - average) ** 2, 0) / scores.length)
       : 0
   const completeness = assessment.scores.completeness ?? 0
-  const sigma = Math.min(
+  let sigma = Math.min(
     MODEL.baseSigma + (1 - completeness) * MODEL.unknownSigma + disagreement * MODEL.disagreementFactor,
     MODEL.maxSigma,
   )
+  if (company && calibration && calibration.spreadMultiplier > 1) {
+    sigma *= calibration.spreadMultiplier
+  }
 
   const caps: string[] = []
   let cap: number | null = null
@@ -405,6 +423,9 @@ function predictGrade(
   }
   if (cap !== null) centre = Math.min(centre, cap)
   if (company?.strictness) centre += company.strictness
+  // Separate from `strictness` on purpose: that is an opinion the user set
+  // about the grader, this is an observation measured from their results.
+  if (company && calibration?.offset) centre += calibration.offset
 
   const step = company?.supports_half_grades ? 0.5 : 1
   const top = company?.grade_scale_max ?? 10
@@ -488,6 +509,12 @@ function predictGrade(
     confidence,
     caps_applied: caps,
     is_user_override: false,
+    source: company && calibration?.offset ? 'calibrated' : 'rules_engine',
+    uncalibrated_likely_grade: null,
+    uncalibrated_probabilities: [],
+    calibration_offset: company && calibration?.offset ? calibration.offset : null,
+    calibration_sample_size: calibration?.sampleSize || null,
+    calibration_note: calibration?.note ?? null,
     baseGrade,
   }
 }
@@ -495,6 +522,12 @@ function predictGrade(
 export function buildGradePrediction(
   assessment: ConditionAssessment | undefined,
   companies: GradingCompany[],
+  /**
+   * What the user's own returned grades taught the model about each grader.
+   * A lookup rather than a value because it is per company, and omitted
+   * entirely when nothing has been learned — which is the fresh-store case.
+   */
+  learned?: (companyId: string) => CalibrationInput | undefined,
 ): CardEvaluation['grade_prediction'] {
   const empty = {
     company_code: null,
@@ -531,7 +564,21 @@ export function buildGradePrediction(
 
   const active = companies.filter((company) => company.active)
   const physical = predictGrade(assessment, null)
-  const byCompany = active.map((company) => predictGrade(assessment, company))
+  const byCompany = active.map((company) => {
+    const calibration = learned?.(company.id)
+    const raw = predictGrade(assessment, company)
+    if (!calibration?.offset && !(calibration && calibration.spreadMultiplier > 1)) return raw
+
+    // The raw model is kept beside the corrected one, never replaced by it: a
+    // silent adjustment leaves you unable to tell whether a prediction moved
+    // because the card differs or because the model learned something.
+    const corrected = predictGrade(assessment, company, calibration)
+    return {
+      ...corrected,
+      uncalibrated_likely_grade: raw.likely_grade,
+      uncalibrated_probabilities: raw.probabilities,
+    }
+  })
   const headline = byCompany[0]
   const completeness = assessment.scores.completeness ?? 0
 
@@ -1376,9 +1423,11 @@ export function buildEvaluation(
   batchSize = 1,
   /** Sales counted per grade label, for per-company slab liquidity. */
   salesByLabel: Record<string, number> = {},
+  /** What the user's own returned grades taught the model, per grader. */
+  learned?: (companyId: string) => CalibrationInput | undefined,
 ): CardEvaluation {
   const today = new Date().toISOString().slice(0, 10)
-  const gradeBlock = buildGradePrediction(assessment, companies)
+  const gradeBlock = buildGradePrediction(assessment, companies, learned)
 
   // A declared value is a statement about the slab you will own, so it is
   // computed per grader — against that grader's own ladder and its own slab
