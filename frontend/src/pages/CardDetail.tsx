@@ -4,13 +4,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ClipboardCheck, Pencil, Scissors, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError, keys } from '@/lib/api'
-import type { CardWrite, ConditionWrite, EvaluationBlock } from '@/lib/types'
+import type { CardWrite, ConditionWrite } from '@/lib/types'
 import { PageHeader } from '@/components/AppShell'
 import { CardForm } from '@/components/CardForm'
 import { ConditionForm } from '@/components/ConditionForm'
 import { ImageUploader } from '@/components/ImageUploader'
 import { ExplanationList } from '@/components/ExplanationList'
 import { GradeProbabilities } from '@/components/GradeProbabilities'
+import { MarketPanel } from '@/components/MarketPanel'
 import { DecisionBadge, StatusBadge } from '@/components/DecisionBadge'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -314,81 +315,53 @@ export function CardDetail() {
                 <GradeProbabilities block={evaluated.grade_prediction} />
               )}
 
-              <div className="grid gap-6 lg:grid-cols-2">
-                <Panel>
-                  <PanelHeader>
-                    <div>
-                      <PanelTitle>Market</PanelTitle>
-                      <PanelDescription>Raw and graded values, with their evidence.</PanelDescription>
-                    </div>
-                    <StatusBadge status={evaluated.market.status} phase={evaluated.market.phase} />
-                  </PanelHeader>
-                  <PanelBody className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <Metric
-                        label="Raw value in use"
-                        value={formatMoney(evaluated.raw.best_raw_value, evaluated.currency)}
-                        hint={
-                          evaluated.raw.raw_value_source === 'user_override'
-                            ? 'Your estimate'
-                            : evaluated.raw.raw_value_source === 'market'
-                              ? 'From market data'
-                              : 'Not set'
-                        }
-                      />
-                      <Metric
-                        label="Net after selling costs"
-                        value={formatMoney(evaluated.raw.net_raw_sale_value, evaluated.currency)}
-                        hint="Phase 4"
-                      />
-                    </div>
-                    <BlockNotice block={evaluated.market} title="Valuation" />
-                    <div className="grid grid-cols-2 gap-3">
-                      <BlockNotice block={evaluated.liquidity} title="Liquidity" compact />
-                      <BlockNotice block={evaluated.trend} title="Trend" compact />
-                    </div>
-                  </PanelBody>
-                </Panel>
+              <MarketPanel cardId={cardId} evaluation={evaluated} />
 
-                <Panel>
-                  <PanelHeader>
-                    <div>
-                      <PanelTitle>Grading routes</PanelTitle>
-                      <PanelDescription>{evaluated.grading_options.reason}</PanelDescription>
-                    </div>
-                  </PanelHeader>
-                  <PanelBody className="space-y-2">
-                    {evaluated.grading_options.options.map((option, index) => (
-                      <div
-                        key={`${option.company_code}-${option.tier_id ?? index}`}
-                        className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm text-ink">
-                            {option.company_code}
-                            {option.tier_name ? ` · ${option.tier_name}` : ''}
-                          </p>
-                          <p className="truncate text-xs text-ink-faint">
-                            {option.available
-                              ? [
-                                  option.requires_batch ? `min ${option.minimum_cards} cards` : null,
-                                  option.turnaround_days ? `${option.turnaround_days} days` : null,
-                                ]
-                                  .filter(Boolean)
-                                  .join(' · ') || 'No minimum'
-                              : option.blockers[0]}
-                          </p>
-                        </div>
-                        <span className="tabular shrink-0 text-sm text-ink">
+              <Panel>
+                <PanelHeader>
+                  <div>
+                    <PanelTitle>Grading routes</PanelTitle>
+                    <PanelDescription>{evaluated.grading_options.reason}</PanelDescription>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[0.7rem] uppercase tracking-wider text-ink-faint">
+                      Net raw sale
+                    </p>
+                    <p className="tabular text-sm text-ink">
+                      {formatMoney(evaluated.raw.net_raw_sale_value, evaluated.currency)}
+                      <span className="ml-1 text-[0.7rem] text-ink-faint">Phase 4</span>
+                    </p>
+                  </div>
+                </PanelHeader>
+                <PanelBody className="grid gap-2 sm:grid-cols-2">
+                  {evaluated.grading_options.options.map((option, index) => (
+                    <div
+                      key={`${option.company_code}-${option.tier_id ?? index}`}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm text-ink">
+                          {option.company_code}
+                          {option.tier_name ? ` · ${option.tier_name}` : ''}
+                        </p>
+                        <p className="truncate text-xs text-ink-faint">
                           {option.available
-                            ? formatMoney(option.grading_fee, option.currency)
-                            : '—'}
-                        </span>
+                            ? [
+                                option.requires_batch ? `min ${option.minimum_cards} cards` : null,
+                                option.turnaround_days ? `${option.turnaround_days} days` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ') || 'No minimum'
+                            : option.blockers[0]}
+                        </p>
                       </div>
-                    ))}
-                  </PanelBody>
-                </Panel>
-              </div>
+                      <span className="tabular shrink-0 text-sm text-ink">
+                        {option.available ? formatMoney(option.grading_fee, option.currency) : '—'}
+                      </span>
+                    </div>
+                  ))}
+                </PanelBody>
+              </Panel>
             </>
           ) : null}
         </div>
@@ -455,26 +428,3 @@ function Metric({
   )
 }
 
-/** Renders a block that has nothing to show yet, with the reason it is empty. */
-function BlockNotice({
-  block,
-  title,
-  compact,
-}: {
-  block: EvaluationBlock
-  title: string
-  compact?: boolean
-}) {
-  if (block.status === 'ok') return null
-  return (
-    <div className="rounded-lg border border-dashed border-line bg-canvas px-3 py-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-ink-muted">{title}</p>
-        <StatusBadge status={block.status} phase={block.phase} />
-      </div>
-      {block.reason && !compact ? (
-        <p className="mt-1 text-xs leading-relaxed text-ink-faint">{block.reason}</p>
-      ) : null}
-    </div>
-  )
-}

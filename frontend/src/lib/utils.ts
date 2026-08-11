@@ -48,8 +48,11 @@ export function formatNumber(value: number | null | undefined, digits = 0): stri
 
 export function formatPercent(value: number | null | undefined, digits = 1): string {
   if (value === null || value === undefined) return '—'
-  const sign = value > 0 ? '+' : ''
-  return `${sign}${value.toFixed(digits)}%`
+  // Round before choosing the sign, so -0.4% at zero digits reads "0%" rather
+  // than the nonsense "-0%".
+  const rounded = Number(value.toFixed(digits))
+  const sign = rounded > 0 ? '+' : ''
+  return `${sign}${Math.abs(rounded) === 0 ? (0).toFixed(digits) : rounded.toFixed(digits)}%`
 }
 
 export function formatScore(value: number | null | undefined): string {

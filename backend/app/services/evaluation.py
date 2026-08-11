@@ -28,7 +28,7 @@ from app.enums import (
     TrendDirection,
 )
 from app.models import Card, DataSource, GradingCompany, MarketPrice, MarketSale
-from app.money import to_major
+from app.money import format_money, to_major, to_minor
 from app.schemas.evaluation import (
     ENGINE_VERSION,
     CardEvaluation,
@@ -77,6 +77,12 @@ _CONFIDENCE_ORDER = [
     Confidence.HIGH.value,
 ]
 _GOOD_CONFIDENCE = {Confidence.MEDIUM.value, Confidence.HIGH.value}
+
+
+def _confidence_phrase(confidence: str) -> str:
+    """"none confidence" is not English. Say what it means instead."""
+    return "no confidence" if confidence == Confidence.NONE.value else f"{confidence} confidence"
+
 
 _TREND_FIELDS = {
     7: "change_7d_pct",
@@ -549,20 +555,26 @@ def _build_trend_block(summary: market_service.MarketSummary) -> TrendBlock:
             ),
             sample_size=trend.sample_size,
         )
+    grade = trend.grade_label or "raw"
     block = TrendBlock(
         status=(
             BlockStatus.OK.value
-            if trend.confidence in {Confidence.HIGH.value, Confidence.MEDIUM.value}
+            if trend.confidence in _GOOD_CONFIDENCE
             else BlockStatus.PARTIAL.value
         ),
         direction=trend.direction,
         confidence=trend.confidence,
         sample_size=trend.sample_size,
+        grade_label=trend.grade_label,
+        reason=(
+            f"{'Raw' if grade == 'raw' else grade} prices only — a trend across pooled grades "
+            "measures which grades happened to sell, not whether prices moved."
+        ),
     )
     if block.status != BlockStatus.OK.value:
         block.reason = (
-            f"Direction from {trend.sample_size} sale(s). A 25% move off three sales is not "
-            "the same claim as a 12% move off a hundred and fifty."
+            f"Direction from {trend.sample_size} {grade} sale(s). A 25% move off three sales "
+            "is not the same claim as a 12% move off a hundred and fifty."
         )
     for horizon, field_name in _TREND_FIELDS.items():
         setattr(block, field_name, trend.changes.get(horizon))
@@ -700,7 +712,7 @@ def _explain(
             ExplanationItem(
                 kind="pass" if grade_block.status == BlockStatus.OK.value else "warn",
                 text=f"Likely {grade_block.company_code} {grade_block.likely_grade:g} "
-                f"({grade_block.confidence} confidence).",
+                f"({_confidence_phrase(grade_block.confidence)}).",
                 detail=detail,
             )
         )
@@ -786,7 +798,10 @@ def _market_explanation(
         items.append(
             ExplanationItem(
                 kind="pass" if raw.confidence in _GOOD_CONFIDENCE else "warn",
-                text=f"Raw value {raw.realistic_sale:,.2f} ({raw.confidence} confidence).",
+                text=(
+                    f"Raw value {format_money(to_minor(raw.realistic_sale), market_block.currency)}"
+                    f" ({_confidence_phrase(raw.confidence)})."
+                ),
                 detail=(
                     f"{raw.sample_size} sale(s) in {raw.window_days} days"
                     + (f", last on {raw.last_sale_at:%d %b %Y}" if raw.last_sale_at else "")
@@ -841,12 +856,20 @@ def _market_explanation(
 
     trend = summary.trend
     if trend.direction != TrendDirection.INSUFFICIENT_DATA.value:
-        change = trend.changes.get(90) or trend.changes.get(30) or trend.changes.get(365)
+        horizon = next(
+            (days for days in (90, 180, 30, 365, 7) if trend.changes.get(days) is not None), None
+        )
+        change = trend.changes.get(horizon) if horizon else None
+        grade = trend.grade_label or "raw"
         items.append(
             ExplanationItem(
                 kind="info",
-                text=f"Trend {trend.direction.replace('_', ' ')} ({trend.confidence} confidence).",
-                detail=f"{change:+.1f}% over the measured window." if change is not None else None,
+                text=f"Trend {trend.direction.replace('_', ' ')} ({_confidence_phrase(trend.confidence)}).",
+                detail=(
+                    f"{change:+.1f}% over {horizon} days on {grade} sales."
+                    if change is not None
+                    else None
+                ),
             )
         )
 

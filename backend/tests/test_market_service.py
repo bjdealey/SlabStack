@@ -226,6 +226,41 @@ def test_a_flat_market_reads_as_stable():
     assert result.direction == TrendDirection.STABLE.value
 
 
+def test_a_trend_is_measured_within_one_grade():
+    """Pooling grades makes a trend measure sales mix, not price.
+
+    Here nothing moves: raw sells at £100 and PSA 10 at £600 throughout. But
+    three PSA 10s land in the recent window and none in the prior one, so a
+    pooled median leaps and reads as a rising market.
+    """
+    pooled = [
+        *series([(150, 100), (140, 100), (130, 100), (120, 100)]),
+        *series([(20, 100), (10, 100), (5, 100), (2, 100)]),
+        *series([(30, 600), (22, 600), (12, 600), (6, 600), (3, 600)], label="PSA 10"),
+    ]
+    naive = market_service.measure_trend(pooled, today=TODAY, params=PARAMS)
+    assert naive.changes[90] is not None and naive.changes[90] > 100, (
+        "the bug this guards against: pooled, a still market reads as a 500% jump"
+    )
+
+    chosen, label = market_service.trend_sales(pooled)
+    assert label == "raw"
+    honest = market_service.measure_trend(chosen, today=TODAY, params=PARAMS)
+    assert honest.direction == TrendDirection.STABLE.value
+    assert honest.changes[90] == 0.0
+    assert honest.grade_label == "raw"
+
+
+def test_trend_falls_back_to_the_most_traded_grade_when_raw_is_thin():
+    sales = [
+        *series([(10, 100)]),
+        *series([(120, 500), (110, 500), (20, 600), (10, 620), (5, 610)], label="PSA 10"),
+    ]
+    chosen, label = market_service.trend_sales(sales)
+    assert label == "PSA 10"
+    assert len(chosen) == 5
+
+
 def test_trend_confidence_reflects_how_many_sales_it_saw():
     thin = market_service.measure_trend(
         series([(150, 100), (140, 100), (10, 150), (5, 150)]), today=TODAY, params=PARAMS

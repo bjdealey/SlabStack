@@ -331,27 +331,28 @@ for the rest. No block ever invents a number to look complete.
     "base_grade": 9.6                // sub-score blend, before any rule applied
   },
 
-  "market": {                       // ⏳ Phase 3
-    "status": "insufficient_data", "phase": 3,
-    "reason": "No market data for this card yet. Add sales manually or enable a data source.",
+  "market": {                       // ✅
+    "status": "ok", "phase": null, "reason": null,
     "currency": "GBP",
-    "raw": null,                    // MarketValueRow
-    "graded": [],                   // one MarketValueRow per grade with enough sales
-    "computed_at": null, "sources": []
+    "raw": { … },                   // MarketValueRow
+    "graded": [ … ],                // one MarketValueRow per grade with sales
+    "computed_at": "2026-08-11T10:04:00Z",
+    "sources": ["Manual entry", "CSV import"]
   },
 
-  "liquidity": {                    // ⏳ Phase 3
-    "status": "insufficient_data", "phase": 3, "score": null, "band": "unknown",
-    "sales_7d": null, "sales_30d": null, "sales_90d": null, "sales_365d": null,
-    "days_since_last_sale": null, "active_listings": null, "sold_to_active_ratio": null,
-    "median_days_between_sales": null, "sales_per_month": null
+  "liquidity": {                    // ✅ — measured across every grade
+    "status": "ok", "phase": null, "score": 8.4, "band": "liquid",
+    "sales_7d": 2, "sales_30d": 9, "sales_90d": 24, "sales_365d": 61,
+    "days_since_last_sale": 3, "active_listings": 11, "sold_to_active_ratio": 2.18,
+    "median_days_between_sales": 5.0, "sales_per_month": 5.08
   },
 
-  "trend": {                        // ⏳ Phase 3
-    "status": "insufficient_data", "phase": 3,
-    "direction": "insufficient_data", "confidence": "none",
-    "change_7d_pct": null, "change_30d_pct": null, "change_90d_pct": null,
-    "change_180d_pct": null, "change_365d_pct": null, "sample_size": 0
+  "trend": {                        // ✅ — measured within ONE grade
+    "status": "ok", "phase": null,
+    "direction": "up", "confidence": "medium",
+    "grade_label": "raw",           // which grade the direction describes
+    "change_7d_pct": null, "change_30d_pct": 7.4, "change_90d_pct": 12.1,
+    "change_180d_pct": null, "change_365d_pct": null, "sample_size": 24
   },
 
   "grading_options": {              // ✅ availability now, ⏳ costing in Phase 4
@@ -403,7 +404,7 @@ for the rest. No block ever invents a number to look complete.
 A `decision_override` set on the card takes precedence and comes back with
 `recommendation.is_user_override: true` — the engine explains itself, but it does not overrule you.
 
-### `MarketValueRow` (Phase 3)
+### `MarketValueRow`
 
 ```jsonc
 {
@@ -583,16 +584,58 @@ Money-valued settings are in major units. `decision_score_weights` must total 10
 
 | Method | Path                          | Status | Description                          |
 | ------ | ----------------------------- | ------ | ------------------------------------ |
-| GET    | `/api/data-sources`           | ✅     | Adapters, enablement, key presence.  |
-| GET    | `/api/market/prices`          | ⏳ P3  | Derived valuations for a card.       |
-| POST   | `/api/market/sales/import`    | ⏳ P3  | CSV / provider import.               |
-| POST   | `/api/market/refresh`         | ⏳ P3  | Refresh from enabled providers.      |
+| Method | Path                                        | Status | Description                                    |
+| ------ | ------------------------------------------- | ------ | ---------------------------------------------- |
+| GET    | `/api/data-sources`                         | ✅     | Adapters, enablement, key presence.            |
+| GET    | `/api/cards/{id}/market`                    | ✅     | Prices, liquidity and trend for one card.      |
+| POST   | `/api/cards/{id}/market/recompute`          | ✅     | Re-fence outliers and reprice; writes a snapshot. |
+| GET    | `/api/cards/{id}/market/sales`              | ✅     | Comparable sales, excluded ones included.      |
+| POST   | `/api/cards/{id}/market/sales`              | ✅     | Record one sale.                               |
+| POST   | `/api/cards/{id}/market/sales/import`       | ✅     | CSV import, deduped and filtered.              |
+| POST   | `/api/cards/{id}/market/reclassify`         | ✅     | Re-run the exclusion filters.                  |
+| GET    | `/api/cards/{id}/market/history`            | ✅     | Daily `price_snapshots`, one series per grade. |
+| GET    | `/api/cards/{id}/market/listings`           | ✅     | Active unsold listings.                        |
+| GET    | `/api/market/sales?catalog_key=…`           | ✅     | Sales for an identity, with no card in hand.   |
+| PATCH  | `/api/market/sales/{sale_id}`               | ✅     | Correct a stored sale.                         |
+| PUT    | `/api/market/sales/{sale_id}/exclusion`     | ✅     | Include or exclude by hand; outranks the system. |
+| DELETE | `/api/market/sales/{sale_id}`               | ✅     | Delete a row entered in error.                 |
+| GET    | `/api/market/prices?catalog_key=…`          | ✅     | Derived valuations for an identity.            |
+| PUT    | `/api/market/prices/{price_id}/override`    | ✅     | Your own value, stored beside the computed one. |
+| POST   | `/api/market/recompute-all`                 | ✅     | Reprice every identity in the collection.      |
+| POST   | `/api/market/refresh`                       | ⏳ P3  | Fetch from a network provider — needs an API key. |
 
 `/api/data-sources` reports `api_key_present` as a boolean and never returns a key value. Keys are
 read from named environment variables; the database stores only the variable's name.
 
-Every network provider ships disabled. `manual` and `csv` are enabled, because they work with no
-network, no key and no terms of service — and they are what the application degrades to.
+Every network provider ships disabled, and `/api/market/refresh` is the one market endpoint still
+returning a `501`. `manual` and `csv` are enabled, because they work with no network, no key and no
+terms of service — and they are what the application degrades to.
+
+### Import
+
+`POST /api/cards/{id}/market/sales/import` takes `{ "csv": "…", "day_first": true }`. Column names
+are matched loosely (a sale date and a price are the only required ones), rows are deduplicated on
+`(source_id, external_id)`, and unreadable rows are reported by line number while the rest import:
+
+```jsonc
+{
+  "imported": 41, "updated": 3, "skipped": 0,
+  "excluded": 6, "outliers_flagged": 1,
+  "exclusions": { "lot_or_bundle": 4, "wrong_language": 1, "damaged": 1 },
+  "errors": [{ "line_number": 58, "message": "Could not read the price.", "values": { … } }],
+  "prices": [ … ]                  // the card is repriced in the same request
+}
+```
+
+### Exclusions
+
+An excluded sale keeps its row, its `exclusion_reason` and `excluded_by` (`system` or `user`), and
+is returned by default. The filters are heuristics over listing titles, so they are wrong sometimes
+and every decision is one request from being reversed. A user's decision outranks the system's and
+survives re-imports and reclassification.
+
+`exclusion_reason`: `lot_or_bundle` · `damaged` · `wrong_card` · `wrong_language` · `wrong_variant` ·
+`wrong_grade` · `price_outlier` · `suspected_fake` · `best_offer_unknown` · `user_excluded`.
 
 ---
 

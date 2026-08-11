@@ -175,6 +175,15 @@ VARIANT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("shadowless", re.compile(r"\bshadowless\b", re.IGNORECASE)),
 )
 
+# Printing is checked separately from variant and more strictly. A 1st edition
+# Charizard and an unlimited one are the same artwork at wildly different
+# prices, and unlike the variant rules there is nothing ambiguous about a title
+# that says "1st Edition": it either is or it is not.
+PRINTING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("first-edition", re.compile(r"\b1st\s*ed(?:ition)?\b|\bfirst\s+edition\b", re.IGNORECASE)),
+    ("shadowless", re.compile(r"\bshadowless\b", re.IGNORECASE)),
+)
+
 GRADE_IN_TITLE = re.compile(
     r"\b(psa|cgc|bgs|beckett|sgc|ace|tag|gma|hga)\s*[-:]?\s*(10|[1-9](?:\.5)?)\b",
     re.IGNORECASE,
@@ -237,6 +246,22 @@ VARIANT_ALIASES: dict[str, str] = {
 def _variant_token(value: str | None) -> str:
     slug = _normalise(value).replace(" ", "-")
     return VARIANT_ALIASES.get(slug, slug)
+
+
+def _printing_mismatch(title: str, variant: str | None, printing: str | None) -> bool:
+    """Does the title name an edition this card is not?
+
+    Stricter than the variant check, and rightly so: a title that names 1st
+    Edition while the card is unlimited is a mismatch even when it also names a
+    matching artwork, because the edition is what sets the price.
+    """
+    found = {name for name, pattern in PRINTING_PATTERNS if pattern.search(title)}
+    if not found:
+        return False
+    # Editions live in ``printing`` normally but users put them in ``variant``
+    # too, so both count as a declaration.
+    declared = {_variant_token(printing), _variant_token(variant)}
+    return not (declared & found)
 
 
 def _variant_mismatch(title: str, expected: str | None, printing: str | None = None) -> bool:
@@ -321,6 +346,11 @@ def classify(
             return (
                 SaleExclusionReason.WRONG_LANGUAGE.value,
                 f"Title names a different language; this card is {context.language}.",
+            )
+        if _printing_mismatch(text, context.variant, context.printing):
+            return (
+                SaleExclusionReason.WRONG_VARIANT.value,
+                f"Title names a different printing; this card is {context.printing or 'unlimited'}.",
             )
         if _variant_mismatch(text, context.variant, context.printing):
             return (

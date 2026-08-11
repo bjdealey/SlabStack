@@ -127,7 +127,10 @@ def _liquidity_out(liquidity: market_service.Liquidity) -> LiquidityOut:
 
 def _trend_out(trend: market_service.Trend) -> TrendOut:
     out = TrendOut(
-        direction=trend.direction, confidence=trend.confidence, sample_size=trend.sample_size
+        direction=trend.direction,
+        confidence=trend.confidence,
+        sample_size=trend.sample_size,
+        grade_label=trend.grade_label,
     )
     for horizon, field_name in HORIZON_FIELDS.items():
         setattr(out, field_name, trend.changes.get(horizon))

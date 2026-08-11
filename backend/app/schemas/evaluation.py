@@ -172,6 +172,13 @@ class LiquidityBlock(EvaluationBlock):
 class TrendBlock(EvaluationBlock):
     direction: str = TrendDirection.INSUFFICIENT_DATA.value
     confidence: str = Confidence.NONE.value
+    grade_label: str | None = Field(
+        default=None,
+        description=(
+            "Which grade the direction describes. A trend across pooled grades measures which "
+            "grades happened to sell, not whether prices moved."
+        ),
+    )
     change_7d_pct: float | None = None
     change_30d_pct: float | None = None
     change_90d_pct: float | None = None

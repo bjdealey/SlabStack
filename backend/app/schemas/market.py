@@ -259,6 +259,7 @@ class LiquidityOut(ApiModel):
 class TrendOut(ApiModel):
     direction: str = TrendDirection.INSUFFICIENT_DATA.value
     confidence: str = Confidence.NONE.value
+    grade_label: str | None = None
     change_7d_pct: float | None = None
     change_30d_pct: float | None = None
     change_90d_pct: float | None = None

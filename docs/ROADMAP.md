@@ -50,37 +50,50 @@ UI, not by the unit tests — they all used complete assessments, where the spre
 
 ---
 
-## Phase 3 — Market data ← next
+## Phase 3 — Market data ✅ (except network providers)
 
-**Have:** `market_sales`, `market_listings`, `market_prices`, `price_snapshots`, `data_sources`,
-and the `MarketDataProvider` interface. Grade probabilities now exist too, so the moment graded
-prices land, expected value becomes computable.
+Valuation, liquidity and trend, computed from sales the user already has.
+`app/services/market_service.py` does the maths; `sales_import.py` gets the data in and keeps the
+bad rows out.
 
-**Smallest useful slice:** manual and CSV sales import. No provider, no API key, no terms review —
-and it is what turns the dashboard's "not calculated" into numbers.
+- Manual entry and CSV import, deduplicated on `(source_id, external_id)`. Column names matched
+  loosely, prices and dates parsed in whatever format they were exported in, bad rows reported by
+  line number while the rest import
+- Exclusion heuristics for lots, damage, customs, wrong language, wrong printing, wrong variant,
+  wrong grade and best-offer sales — plus an IQR price fence, per grade
+- Valuation: median, recency-weighted median, quartiles, realistic and quick-sale figures, each
+  carrying `sample_size`, `window_days`, `last_sale_at` and `confidence`
+- Liquidity from frequency, recency and the sold-to-active ratio, measured across every grade
+- Trend across 7/30/90/180/365 days with its own confidence, measured **within one grade**
+- Daily `price_snapshots`, so a price history accrues with no provider connected
+- `evaluate_card`'s market, liquidity and trend blocks are real, and `data_confidence` is now the
+  weakest link rather than a placeholder
 
-**Build:**
+Three rules the filtering follows: excluded is never deleted, only positive evidence excludes (a
+title that fails to say "English" is not evidence of a Japanese card), and the outlier fence is not
+drawn below eight sales, because a fence drawn by five points is drawn by the points it is meant to
+judge.
 
-1. Adapters behind the existing interface. Official APIs only, under each service's terms — a
-   source that requires scraping a site that forbids it does not belong here.
-2. Import + dedupe on `(source_id, external_id)`, writing to `catalog_key`.
-3. Exclusion filtering: lots, bundles, damaged, wrong card/language/variant/grade, price outliers.
-   Excluded rows are kept with a reason and are reversible.
-4. Valuation: median, recency-weighted median, quartiles, realistic and quick-sale figures — with
-   `sample_size`, `window_days` and `confidence` attached to every number.
-5. Liquidity score and band from sales counts, gaps and the sold-to-active ratio.
-6. Trend across 7/30/90/180/365 days, **with its own confidence** — +25% from three sales is not
-   +12% from a hundred and fifty.
-7. Daily `price_snapshots`, so your history accrues regardless of provider.
-8. `CardIdentificationProvider` for image-assisted identification — always a suggestion the user
-   confirms, never applied silently.
+**Not built:** network provider adapters (PokePrice, PriceCharting, eBay, Cardmarket, TCGplayer).
+They need API credentials and each service's terms reviewed, and shipping untested network code
+against unreachable APIs would be a guess. `POST /api/market/refresh` stays a `501` that says what
+does work without it; the `MarketDataProvider` interface and the disabled `data_sources` rows are
+already there. Also outstanding: `CardIdentificationProvider` for image-assisted identification —
+always a suggestion the user confirms, never applied silently.
+
+**Learned the hard way, twice.** A trend measured across pooled grades measures *sales mix*, not
+price: three PSA 10s selling in a month when none sold the month before makes a still market read
+as a 500% jump. And when a valuation falls back outside its window it has to widen the window it
+reports — saying "90 days" while valuing sales that span nine months is the false precision the
+whole module exists to avoid. Both were found by driving the UI against realistic data, not by the
+unit tests.
 
 **Watch for:** blending markets. Language, variant and printing are in `catalog_key` precisely so a
 Japanese copy's sales never contaminate an English alt art's median.
 
 ---
 
-## Phase 4 — Grading economics
+## Phase 4 — Grading economics ← next
 
 **Have:** companies, tiers, minimums, declared-value ceilings, memberships, selling profiles, and
 `allocate()` for shared costs.

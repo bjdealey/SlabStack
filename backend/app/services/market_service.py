@@ -344,6 +344,9 @@ class Trend:
     confidence: str = Confidence.NONE.value
     changes: dict[int, float | None] = field(default_factory=dict)
     sample_size: int = 0
+    # Which grade the direction describes. A trend is only meaningful within one
+    # grade — see ``trend_sales``.
+    grade_label: str | None = None
 
 
 def _change_over(
@@ -380,15 +383,41 @@ def _direction(change: float) -> str:
     return TrendDirection.STRONG_DOWN.value
 
 
+def trend_sales(sales: list[MarketSale]) -> tuple[list[MarketSale], str | None]:
+    """Pick the one grade a trend can honestly be measured on.
+
+    Pooling grades makes the trend measure *sales mix* rather than price: if
+    three PSA 10s sell this month and none sold last month, the pooled median
+    leaps and reads as a rising market when nothing moved. So the trend is
+    measured within a single grade — raw when it has the depth, otherwise
+    whichever grade trades most — and the answer says which grade it describes.
+    """
+    if not sales:
+        return [], None
+
+    by_label: dict[str, list[MarketSale]] = {}
+    for sale in sales:
+        by_label.setdefault(sale.grade_label, []).append(sale)
+
+    raw = by_label.get("raw", [])
+    if len(raw) >= 4:
+        return raw, "raw"
+    label = max(by_label, key=lambda key: (len(by_label[key]), key != "raw"))
+    return by_label[label], label
+
+
 def measure_trend(sales: list[MarketSale], *, today: date, params: MarketParameters) -> Trend:
     """Price direction, with its own confidence.
 
     Spec section 20: +25% from three sales is not the same claim as +12% from a
     hundred and fifty, and the number alone cannot tell them apart.
+
+    ``sales`` must be a single grade — use ``trend_sales`` to choose one.
     """
     result = Trend()
     if not sales:
         return result
+    result.grade_label = sales[0].grade_label
 
     comparable = 0
     for horizon in HORIZONS:
@@ -406,14 +435,13 @@ def measure_trend(sales: list[MarketSale], *, today: date, params: MarketParamet
             comparable = comparable or 0
             break
 
+    result.sample_size = len(sales)
     if headline is None:
         result.direction = TrendDirection.INSUFFICIENT_DATA.value
         result.confidence = Confidence.NONE.value
-        result.sample_size = len(sales)
         return result
 
     result.direction = _direction(headline)
-    result.sample_size = len(sales)
 
     if len(sales) >= params.min_sales_high:
         result.confidence = Confidence.HIGH.value
@@ -657,12 +685,13 @@ def summarise(
     )
 
     computed = [row.computed_at for row in prices if row.computed_at is not None]
+    for_trend, _label = trend_sales(sales)
     return MarketSummary(
         catalog_key=catalog_key,
         currency=currency,
         prices=prices,
         liquidity=measure_liquidity(sales, today=today, active_listings=listings or None),
-        trend=measure_trend(sales, today=today, params=params),
+        trend=measure_trend(for_trend, today=today, params=params),
         sale_count=len(sales),
         excluded_count=excluded,
         grade_labels=grade_labels_for(db, catalog_key),

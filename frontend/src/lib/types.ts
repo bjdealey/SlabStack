@@ -471,6 +471,8 @@ export interface LiquidityBlock extends EvaluationBlock {
 export interface TrendBlock extends EvaluationBlock {
   direction: string
   confidence: Confidence
+  /** Which grade the direction describes — a pooled trend measures sales mix, not price. */
+  grade_label: string | null
   change_7d_pct: number | null
   change_30d_pct: number | null
   change_90d_pct: number | null
@@ -603,6 +605,159 @@ export interface EnumsResponse {
   enums: Record<string, string[]>
   defect_fields: string[]
   corner_fields: string[]
+}
+
+/* --- Market -------------------------------------------------------------- */
+
+export type ExclusionReason =
+  | 'lot_or_bundle'
+  | 'damaged'
+  | 'wrong_card'
+  | 'wrong_language'
+  | 'wrong_variant'
+  | 'wrong_grade'
+  | 'price_outlier'
+  | 'suspected_fake'
+  | 'best_offer_unknown'
+  | 'user_excluded'
+
+export interface MarketSale {
+  id: string
+  catalog_key: string
+  card_id: string | null
+  company_id: string | null
+  grade: number | null
+  grade_label: string
+  platform: string | null
+  sale_date: string
+  sale_price: number
+  currency: string
+  shipping: number | null
+  total_paid: number | null
+  condition_note: string | null
+  listing_title: string | null
+  source_url: string | null
+  seller: string | null
+  bid_count: number | null
+  lot_size: number
+  is_auction: boolean | null
+  is_excluded: boolean
+  exclusion_reason: ExclusionReason | null
+  excluded_by: 'system' | 'user' | null
+  is_outlier: boolean
+  source_id: string | null
+  external_id: string | null
+  imported_at: string | null
+}
+
+export interface MarketPrice {
+  id: string
+  catalog_key: string
+  company_id: string | null
+  grade: number | null
+  grade_label: string
+  currency: string
+  median: number | null
+  weighted_median: number | null
+  mean: number | null
+  low_quartile: number | null
+  high_quartile: number | null
+  last_sale: number | null
+  realistic_sale: number | null
+  quick_sale: number | null
+  sample_size: number
+  window_days: number | null
+  last_sale_at: string | null
+  confidence: Confidence
+  computed_at: string | null
+  user_value: number | null
+  user_value_note: string | null
+  premium_vs_raw_pct: number | null
+}
+
+export interface MarketLiquidity {
+  score: number | null
+  band: string
+  sales_7d: number
+  sales_30d: number
+  sales_90d: number
+  sales_365d: number
+  days_since_last_sale: number | null
+  active_listings: number | null
+  sold_to_active_ratio: number | null
+  median_days_between_sales: number | null
+  sales_per_month: number | null
+}
+
+export interface MarketTrend {
+  direction: string
+  confidence: Confidence
+  grade_label: string | null
+  change_7d_pct: number | null
+  change_30d_pct: number | null
+  change_90d_pct: number | null
+  change_180d_pct: number | null
+  change_365d_pct: number | null
+  sample_size: number
+}
+
+export interface MarketSummary {
+  catalog_key: string
+  currency: string
+  prices: MarketPrice[]
+  liquidity: MarketLiquidity
+  trend: MarketTrend
+  sale_count: number
+  excluded_count: number
+  grade_labels: string[]
+  computed_at: string | null
+}
+
+export interface SaleWrite {
+  sale_date: string
+  sale_price: number
+  currency?: string | null
+  shipping?: number | null
+  grade_label?: string | null
+  company_id?: string | null
+  grade?: number | null
+  platform?: string | null
+  listing_title?: string | null
+  source_url?: string | null
+  seller?: string | null
+  lot_size?: number
+  condition_note?: string | null
+  apply_filters?: boolean
+}
+
+export interface ImportRowError {
+  line_number: number | null
+  message: string
+  values: Record<string, string>
+}
+
+export interface ImportResult {
+  imported: number
+  updated: number
+  skipped: number
+  excluded: number
+  outliers_flagged: number
+  exclusions: Record<string, number>
+  errors: ImportRowError[]
+  prices: MarketPrice[]
+}
+
+export interface SnapshotPoint {
+  snapshot_date: string
+  value: number
+  sample_size: number
+  active_listings: number | null
+}
+
+export interface SnapshotSeries {
+  grade_label: string
+  currency: string
+  points: SnapshotPoint[]
 }
 
 export interface HealthResponse {

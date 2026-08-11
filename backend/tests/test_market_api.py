@@ -349,3 +349,49 @@ def test_two_copies_of_the_same_card_share_one_market_history(client: TestClient
     seed_raw_sales(client, card["id"])
     body = client.get(f"/api/cards/{duplicate['id']}/market").json()
     assert body["sale_count"] == 12, "the second copy sees the first copy's comparables"
+
+
+def test_the_why_panel_does_not_say_none_confidence(client: TestClient, card: dict):
+    """'none confidence' is not English, and the raw value needs its currency."""
+    for index in range(3):
+        add_sale(client, card["id"], days=index * 20, price=150.0)
+    body = client.get(f"/api/cards/{card['id']}/evaluation").json()
+
+    raw_line = next(
+        item for item in body["explanation"] if item["text"].startswith("Raw value")
+    )
+    assert "none confidence" not in raw_line["text"]
+    assert "£" in raw_line["text"]
+
+
+def test_the_dashboard_total_uses_market_values_where_it_has_them(client: TestClient, card: dict):
+    """A card with comparables should be valued by the market, not by what it cost."""
+    before = client.get("/api/collection/summary").json()["values"]
+    assert before["known_raw_value"] == 185.0, "purchase price is the only figure so far"
+    assert "no card has comparable sales yet" in before["values_reason"]
+
+    seed_raw_sales(client, card["id"], count=12, price=300.0)
+    after = client.get("/api/collection/summary").json()["values"]
+
+    assert after["known_raw_value"] > 290
+    assert after["cards_with_value"] == 1
+    assert "market valuation for 1 card" in after["values_reason"]
+
+
+def test_your_own_raw_estimate_still_outranks_the_market(client: TestClient, card: dict):
+    seed_raw_sales(client, card["id"], count=12, price=300.0)
+    client.patch(f"/api/cards/{card['id']}", json={"user_raw_value": 500.0})
+
+    values = client.get("/api/collection/summary").json()["values"]
+    assert values["known_raw_value"] == 500.0
+
+
+def test_readiness_counts_cards_covered_not_sales_stored(client: TestClient, card: dict):
+    """A hundred sales on one card does not make the other eleven analysable."""
+    client.post("/api/cards", json={"name": "Rayquaza VMAX", "set_code": "EVS"})
+    seed_raw_sales(client, card["id"], count=20)
+
+    readiness = client.get("/api/collection/summary").json()["readiness"]
+    market = next(item for item in readiness if item["key"] == "market_data")
+    assert market["count"] == 1
+    assert market["total"] == 2

@@ -22,8 +22,15 @@ import type {
   FaceDefects,
   GradingCompany,
   GradingOption,
+  MarketBlock,
+  MarketPrice,
+  MarketSummary,
+  MarketValueRow,
   Severity,
+  TrendBlock,
 } from '@/lib/types'
+import { formatMoney } from '@/lib/utils'
+import { premiumVsRawPct } from './market'
 
 export const DEFECT_FIELDS = [
   'corner_tl',
@@ -538,12 +545,225 @@ function buildGradePrediction(
 // Mirrors app/services/evaluation.py
 const NOTABLE = new Set(['moderate', 'severe'])
 
+const CONFIDENCE_ORDER = ['none', 'low', 'medium', 'high'] as const
+const GOOD_CONFIDENCE = new Set(['medium', 'high'])
+const rank = (confidence: string) => CONFIDENCE_ORDER.indexOf(confidence as 'none')
+
+/** "none confidence" is not English. Say what it means instead. */
+const confidencePhrase = (confidence: string) =>
+  confidence === 'none' ? 'no confidence' : `${confidence} confidence`
+
+const NO_MARKET_REASON =
+  'No market data for this card yet. Add sales manually, import a CSV, or connect a data source.'
+
+function valueRow(price: MarketSummary['prices'][number]): MarketValueRow {
+  return {
+    grade_label: price.grade_label,
+    company_code: null,
+    grade: price.grade,
+    median: price.median,
+    weighted_median: price.weighted_median,
+    low_quartile: price.low_quartile,
+    high_quartile: price.high_quartile,
+    last_sale: price.last_sale,
+    // The user's own figure is what they will act on (spec section 35).
+    realistic_sale: price.user_value ?? price.realistic_sale,
+    quick_sale: price.quick_sale,
+    sample_size: price.sample_size,
+    window_days: price.window_days,
+    last_sale_at: price.last_sale_at,
+    confidence: price.confidence,
+    premium_vs_raw_pct: price.premium_vs_raw_pct,
+    is_user_override: price.user_value !== null,
+  }
+}
+
+function buildMarketBlock(market: MarketSummary, currency: string): MarketBlock {
+  const blank = { currency, raw: null, graded: [], computed_at: null, sources: [] }
+
+  if (!market.catalog_key) {
+    return {
+      ...blank,
+      status: 'insufficient_data',
+      phase: 3,
+      reason: 'This card has no catalog key, so sales cannot be matched to it.',
+    }
+  }
+  if (!market.prices.length) {
+    return {
+      ...blank,
+      status: 'insufficient_data',
+      phase: 3,
+      reason: market.excluded_count
+        ? `${market.excluded_count} sale(s) stored, all excluded as non-comparable (lots, damage, wrong language or variant). Review the exclusions if that looks wrong — every one is reversible.`
+        : NO_MARKET_REASON,
+    }
+  }
+
+  const rawPrice = market.prices.find((price) => price.grade_label === 'raw')
+  const raw = rawPrice ? valueRow(rawPrice) : null
+  const graded = market.prices
+    .filter((price) => price.grade_label !== 'raw')
+    .sort((a, b) => (b.grade ?? 0) - (a.grade ?? 0))
+    .map((price) => ({ ...valueRow(price), premium_vs_raw_pct: premiumVsRawPct(rawPrice, price) }))
+
+  const best = market.prices.reduce(
+    (top, price) => (rank(price.confidence) > rank(top) ? price.confidence : top),
+    'none' as string,
+  )
+  let status: MarketBlock['status'] = GOOD_CONFIDENCE.has(best) ? 'ok' : 'partial'
+  let reason: string | null = null
+  if (status !== 'ok') {
+    const thin = rawPrice ?? market.prices[0]
+    reason = `Thin evidence: ${thin.sample_size} sale(s) in the last ${thin.window_days} days. Treat these figures as indicative.`
+  }
+  if (!raw) {
+    const note = 'No raw sales stored, so there is nothing to compare a slab against.'
+    reason = reason ? `${reason} ${note}` : note
+    status = 'partial'
+  }
+
+  return {
+    status,
+    phase: null,
+    reason,
+    currency,
+    raw,
+    graded,
+    computed_at: market.computed_at,
+    sources: market.sale_count ? ['Manual entry'] : [],
+  }
+}
+
+function buildTrendBlock(market: MarketSummary): TrendBlock {
+  const trend = market.trend
+  const grade = trend.grade_label ?? 'raw'
+  if (trend.direction === 'insufficient_data') {
+    return {
+      status: 'insufficient_data',
+      phase: 3,
+      reason: `A trend needs sales in two comparable periods, not a single price. ${trend.sample_size} sale(s) stored.`,
+      ...trend,
+    }
+  }
+  const status = GOOD_CONFIDENCE.has(trend.confidence) ? 'ok' : 'partial'
+  return {
+    status,
+    phase: null,
+    reason:
+      status === 'ok'
+        ? `${grade === 'raw' ? 'Raw' : grade} prices only — a trend across pooled grades measures which grades happened to sell, not whether prices moved.`
+        : `Direction from ${trend.sample_size} ${grade} sale(s). A 25% move off three sales is not the same claim as a 12% move off a hundred and fifty.`,
+    ...trend,
+  }
+}
+
+/** The market half of the "Why?" panel, and what it still needs. */
+function marketExplanation(
+  market: MarketSummary,
+  block: MarketBlock,
+  blockers: string[],
+): ExplanationItem[] {
+  const items: ExplanationItem[] = []
+
+  if (market.sale_count === 0) {
+    if (market.excluded_count) {
+      items.push({
+        kind: 'fail',
+        text: `All ${market.excluded_count} stored sale(s) were filtered out.`,
+        detail: 'Open the sales list to see why, and include any that were wrong.',
+      })
+      blockers.push(
+        'Every stored sale was excluded as non-comparable. Review the exclusions or add sales of the card itself.',
+      )
+    } else {
+      items.push({ kind: 'fail', text: 'No comparable sales stored.', detail: null })
+      blockers.push('Add comparable sales for the raw card and each relevant grade.')
+    }
+    return items
+  }
+
+  let detail = `${market.sale_count} counted`
+  if (market.excluded_count) detail += `, ${market.excluded_count} excluded as non-comparable`
+  items.push({
+    kind: block.status === 'ok' ? 'pass' : 'warn',
+    text: `${market.sale_count} comparable sale(s) stored locally.`,
+    detail: `${detail}. Every exclusion is listed and reversible.`,
+  })
+
+  const raw = block.raw
+  if (raw && raw.realistic_sale !== null) {
+    items.push({
+      kind: GOOD_CONFIDENCE.has(raw.confidence) ? 'pass' : 'warn',
+      text: `Raw value ${formatMoney(raw.realistic_sale, block.currency)} (${confidencePhrase(raw.confidence)}).`,
+      detail: `${raw.sample_size} sale(s) in ${raw.window_days} days.`,
+    })
+  } else if (!raw) {
+    items.push({ kind: 'warn', text: 'No raw sales stored for this card.', detail: null })
+    blockers.push('Add raw sales — grading profit is measured against selling it raw.')
+  }
+
+  if (!block.graded.length) {
+    blockers.push(
+      'Add graded sales for the grades this card could realistically get, so the upside can be measured rather than assumed.',
+    )
+  } else {
+    const best = block.graded.reduce((top, row) =>
+      (row.premium_vs_raw_pct ?? -Infinity) > (top.premium_vs_raw_pct ?? -Infinity) ? row : top,
+    )
+    if (best.premium_vs_raw_pct !== null) {
+      items.push({
+        kind: 'info',
+        text: `${best.grade_label} sells ${best.premium_vs_raw_pct > 0 ? '+' : ''}${best.premium_vs_raw_pct.toFixed(0)}% against raw.`,
+        detail: `${best.sample_size} sale(s) behind that figure.`,
+      })
+    }
+  }
+
+  const liquidity = market.liquidity
+  if (liquidity.score !== null) {
+    items.push({
+      kind: liquidity.score < 5 ? 'warn' : 'pass',
+      text: `Liquidity ${liquidity.score.toFixed(1)}/10 — ${liquidity.band.replace(/_/g, ' ')}.`,
+      detail: liquidity.median_days_between_sales
+        ? `Median ${Math.round(liquidity.median_days_between_sales)} days between sales.`
+        : null,
+    })
+    if (liquidity.score < 3) {
+      blockers.push(
+        'This card barely trades. Check you could actually sell the slab before spending on grading.',
+      )
+    }
+  }
+
+  const trend = market.trend
+  if (trend.direction !== 'insufficient_data') {
+    const horizons: [number, number | null][] = [
+      [90, trend.change_90d_pct],
+      [180, trend.change_180d_pct],
+      [30, trend.change_30d_pct],
+      [365, trend.change_365d_pct],
+      [7, trend.change_7d_pct],
+    ]
+    const found = horizons.find(([, change]) => change !== null)
+    items.push({
+      kind: 'info',
+      text: `Trend ${trend.direction.replace(/_/g, ' ')} (${confidencePhrase(trend.confidence)}).`,
+      detail: found
+        ? `${found[1]! > 0 ? '+' : ''}${found[1]!.toFixed(1)}% over ${found[0]} days on ${trend.grade_label ?? 'raw'} sales.`
+        : null,
+    })
+  }
+
+  return items
+}
+
 export function buildEvaluation(
   card: Card,
   assessment: ConditionAssessment | undefined,
   companies: GradingCompany[],
   currency: string,
-  marketSalesStored: number,
+  market: MarketSummary,
 ): CardEvaluation {
   const options: GradingOption[] = []
   for (const company of companies.filter((c) => c.active)) {
@@ -629,6 +849,13 @@ export function buildEvaluation(
     })
   }
 
+  const marketBlock = buildMarketBlock(market, currency)
+  const gradeBlock = buildGradePrediction(assessment, companies)
+  const rawPrice = market.prices.find((price) => price.grade_label === 'raw')
+  const marketRawValue = rawPrice
+    ? (rawPrice.user_value ?? rawPrice.realistic_sale ?? rawPrice.median)
+    : null
+
   if (!assessment) {
     explanation.push({ kind: 'fail', text: 'Condition not assessed.', detail: null })
     blockers.push("Assess the card's condition.")
@@ -648,19 +875,30 @@ export function buildEvaluation(
         detail: notable.slice(0, 4).join('; '),
       })
     }
-    blockers.push('Run the grade probability model (Phase 2).')
   }
 
-  if (marketSalesStored) {
+  if (gradeBlock.status === 'ok' || gradeBlock.status === 'partial') {
+    const top = gradeBlock.probabilities[0]
     explanation.push({
-      kind: 'pass',
-      text: `${marketSalesStored} comparable sale(s) stored locally.`,
-      detail: null,
+      kind: gradeBlock.status === 'ok' ? 'pass' : 'warn',
+      text: `Likely ${gradeBlock.company_code} ${gradeBlock.likely_grade} (${confidencePhrase(gradeBlock.confidence)}).`,
+      detail: top
+        ? `${top.label} at ${Math.round(top.probability * 100)}%, range ${gradeBlock.grade_min}–${gradeBlock.grade_max}.`
+        : null,
     })
-  } else {
-    explanation.push({ kind: 'fail', text: 'No market data for this card.', detail: null })
+    if (gradeBlock.caps_applied.length) {
+      explanation.push({
+        kind: 'warn',
+        text: `Capped at ${gradeBlock.max_grade_cap} by ${gradeBlock.caps_applied.length} rule(s).`,
+        detail: gradeBlock.caps_applied.slice(0, 3).join('; '),
+      })
+    }
+    if (gradeBlock.status === 'partial') {
+      blockers.push('Finish the condition assessment to narrow the grade estimate.')
+    }
   }
-  blockers.push('Add comparable sales for the raw card and each relevant grade.')
+
+  explanation.push(...marketExplanation(market, marketBlock, blockers))
 
   const available = options.filter((option) => option.available)
   if (available.length) {
@@ -755,9 +993,10 @@ export function buildEvaluation(
       currency,
       purchase_price: card.purchase_price,
       user_raw_value: card.user_raw_value,
-      market_raw_value: null,
-      best_raw_value: card.user_raw_value,
-      raw_value_source: card.user_raw_value !== null ? 'user_override' : null,
+      market_raw_value: marketRawValue,
+      best_raw_value: card.user_raw_value ?? marketRawValue,
+      raw_value_source:
+        card.user_raw_value !== null ? 'user_override' : marketRawValue !== null ? 'market' : null,
       net_raw_sale_value: null,
     },
     condition: {
@@ -784,46 +1023,27 @@ export function buildEvaluation(
       },
       notable_defects: notable,
     },
-    grade_prediction: buildGradePrediction(assessment, companies),
-    market: {
-      status: 'insufficient_data',
-      phase: 3,
-      reason: 'No market data for this card yet. Add sales manually or enable a data source.',
-      currency,
-      raw: null,
-      graded: [],
-      computed_at: null,
-      sources: [],
-    },
-    liquidity: {
-      status: 'insufficient_data',
-      phase: 3,
-      reason: 'Liquidity needs sales history.',
-      score: null,
-      band: 'unknown',
-      sales_7d: null,
-      sales_30d: null,
-      sales_90d: null,
-      sales_365d: null,
-      days_since_last_sale: null,
-      active_listings: null,
-      sold_to_active_ratio: null,
-      median_days_between_sales: null,
-      sales_per_month: null,
-    },
-    trend: {
-      status: 'insufficient_data',
-      phase: 3,
-      reason: 'A trend needs a series of sales, not a single price.',
-      direction: 'insufficient_data',
-      confidence: 'none',
-      change_7d_pct: null,
-      change_30d_pct: null,
-      change_90d_pct: null,
-      change_180d_pct: null,
-      change_365d_pct: null,
-      sample_size: 0,
-    },
+    grade_prediction: gradeBlock,
+    market: marketBlock,
+    liquidity:
+      market.liquidity.score === null
+        ? {
+            status: 'insufficient_data',
+            phase: 3,
+            reason:
+              'Liquidity needs sales history. No comparable sales are stored for this card.',
+            ...market.liquidity,
+          }
+        : {
+            status: market.liquidity.sales_365d >= 6 ? 'ok' : 'partial',
+            phase: null,
+            reason:
+              market.liquidity.sales_365d >= 6
+                ? null
+                : `Based on ${market.liquidity.sales_365d} sale(s) in a year — a thin basis for a score.`,
+            ...market.liquidity,
+          },
+    trend: buildTrendBlock(market),
     grading_options: {
       status: options.length ? 'partial' : 'insufficient_data',
       phase: 4,
@@ -841,7 +1061,13 @@ export function buildEvaluation(
     recommendation,
     explanation,
     blockers,
-    data_confidence: 'none',
+    // The weakest link, not the average: a perfect assessment with two sales
+    // behind it is still a two-sale answer.
+    data_confidence: [
+      complete >= 0.85 ? 'high' : complete >= 0.5 ? 'medium' : assessment ? 'low' : 'none',
+      gradeBlock.confidence,
+      marketBlock.raw?.confidence ?? 'none',
+    ].sort((a, b) => rank(a) - rank(b))[0] as CardEvaluation['data_confidence'],
   }
 }
 
@@ -850,7 +1076,23 @@ export function buildSummary(
   conditions: Map<string, ConditionAssessment>,
   companies: GradingCompany[],
   currency: string,
+  prices: MarketPrice[] = [],
+  salesStored = 0,
 ): CollectionSummary {
+  // Best raw value per card, in order of how close each source is to what the
+  // user would actually get. Purchase price is last on purpose: it is what the
+  // card cost, which says nothing about what it is worth now.
+  const rawPrice = (card: Card) =>
+    prices.find((price) => price.catalog_key === card.catalog_key && price.grade_label === 'raw')
+  const marketValue = (card: Card) => {
+    const price = rawPrice(card)
+    return price ? (price.user_value ?? price.realistic_sale ?? price.median) : null
+  }
+  const bestValue = (card: Card) =>
+    card.user_raw_value ?? marketValue(card) ?? card.purchase_price ?? null
+  const marketValued = cards.filter(
+    (card) => card.user_raw_value === null && marketValue(card) !== null,
+  ).length
   const totalCards = cards.length
   const copies = cards.reduce((sum, card) => sum + card.quantity, 0)
   const withImages = cards.filter((card) => card.images.length > 0).length
@@ -864,13 +1106,8 @@ export function buildSummary(
     0,
   )
   const userTotal = cards.reduce((sum, card) => sum + (card.user_raw_value ?? 0) * card.quantity, 0)
-  const knownRaw = cards.reduce(
-    (sum, card) => sum + (card.user_raw_value ?? card.purchase_price ?? 0) * card.quantity,
-    0,
-  )
-  const cardsWithValue = cards.filter(
-    (card) => card.user_raw_value !== null || card.purchase_price !== null,
-  ).length
+  const knownRaw = cards.reduce((sum, card) => sum + (bestValue(card) ?? 0) * card.quantity, 0)
+  const cardsWithValue = cards.filter((card) => bestValue(card) !== null).length
 
   const byStatus: Record<string, number> = {}
   for (const card of cards) byStatus[card.status] = (byStatus[card.status] ?? 0) + 1
@@ -935,8 +1172,9 @@ export function buildSummary(
       potential_uplift: null,
       expected_profit: null,
       values_status: 'partial',
-      values_reason:
-        'Raw value is your own figure or purchase price. Market valuation, graded upside and expected profit need the market-data and decision engines.',
+      values_reason: marketValued
+        ? `Raw value uses your own figure where you set one, a market valuation for ${marketValued} card(s), and the purchase price otherwise. Graded upside and expected profit need the grading-cost and decision engines.`
+        : 'Raw value is your own figure or purchase price — no card has comparable sales yet. Graded upside and expected profit need the grading-cost and decision engines.',
     },
     decisions,
     by_status: byStatus,
@@ -969,12 +1207,14 @@ export function buildSummary(
       {
         key: 'market_data',
         label: 'Comparable sales stored',
-        count: 0,
-        total: Math.max(totalCards, 1),
+        // Cards covered, not sales counted: readiness is "how much of the
+        // collection can be analysed".
+        count: cards.filter((card) => rawPrice(card) !== undefined).length,
+        total: totalCards,
         action: 'Import or enter sold comparables',
       },
     ],
-    market_sales_stored: 0,
+    market_sales_stored: salesStored,
     priced_tiers_configured: pricedTiers,
   }
 }

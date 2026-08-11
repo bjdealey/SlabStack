@@ -109,6 +109,17 @@ def test_a_wrong_variant_comparable_is_excluded():
     assert verdict("Umbreon VMAX Reverse Holo") == SaleExclusionReason.WRONG_VARIANT.value
 
 
+def test_a_first_edition_comparable_is_excluded_from_an_unlimited_card():
+    """Even when the artwork matches. The edition is what sets the price."""
+    unlimited = SaleContext(
+        catalog_key="k", language="English", variant="Alternate Art", printing="Unlimited"
+    )
+    assert verdict("Umbreon VMAX Alt Art 1st Edition", context=unlimited) == (
+        SaleExclusionReason.WRONG_VARIANT.value
+    )
+    assert verdict("Umbreon VMAX Alt Art", context=unlimited) is None
+
+
 def test_the_printing_field_counts_as_an_accepted_variant():
     """A 1st edition comparable for a 1st edition card is not a mismatch."""
     context = SaleContext(
