@@ -24,8 +24,8 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: <LayoutDashboard className="size-4" /> },
   { to: '/collection', label: 'Collection', icon: <Boxes className="size-4" /> },
-  { to: '/submissions', label: 'Submissions', icon: <PackageCheck className="size-4" />, phase: 6 },
-  { to: '/analytics', label: 'Analytics', icon: <TrendingUp className="size-4" />, phase: 7 },
+  { to: '/submissions', label: 'Submissions', icon: <PackageCheck className="size-4" /> },
+  { to: '/analytics', label: 'Analytics', icon: <TrendingUp className="size-4" /> },
   { to: '/settings', label: 'Settings', icon: <Settings2 className="size-4" /> },
 ]
 

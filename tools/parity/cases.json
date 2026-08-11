@@ -358,5 +358,79 @@
         300
       ]
     }
+  ],
+  "listings": [
+    {
+      "name": "liquid card, modest markup",
+      "realisticMinor": 12600,
+      "highQuartileMinor": 13275,
+      "liquidityScore": 9.9
+    },
+    {
+      "name": "middling liquidity, ten percent",
+      "realisticMinor": 12600,
+      "highQuartileMinor": 20000,
+      "liquidityScore": 5.0
+    },
+    {
+      "name": "illiquid, needs room",
+      "realisticMinor": 12600,
+      "highQuartileMinor": 30000,
+      "liquidityScore": 1.2
+    },
+    {
+      "name": "no liquidity reading at all",
+      "realisticMinor": 12600,
+      "highQuartileMinor": null,
+      "liquidityScore": null
+    },
+    {
+      "name": "capped at the upper quartile",
+      "realisticMinor": 12600,
+      "highQuartileMinor": 13000,
+      "liquidityScore": 1.0
+    },
+    {
+      "name": "quartile below the realistic price, so no cap",
+      "realisticMinor": 20000,
+      "highQuartileMinor": 18000,
+      "liquidityScore": 1.0
+    },
+    {
+      "name": "quartile equal to the realistic price",
+      "realisticMinor": 12600,
+      "highQuartileMinor": 12600,
+      "liquidityScore": 2.0
+    },
+    {
+      "name": "nothing to price against",
+      "realisticMinor": null,
+      "highQuartileMinor": 5000,
+      "liquidityScore": 8.0
+    },
+    {
+      "name": "rounds up across a half penny",
+      "realisticMinor": 3333,
+      "highQuartileMinor": null,
+      "liquidityScore": 8.0
+    },
+    {
+      "name": "rounds up across a half penny, illiquid",
+      "realisticMinor": 4567,
+      "highQuartileMinor": null,
+      "liquidityScore": 1.0
+    },
+    {
+      "name": "exactly on the liquid boundary",
+      "realisticMinor": 10000,
+      "highQuartileMinor": null,
+      "liquidityScore": 7.0
+    },
+    {
+      "name": "exactly on the middling boundary",
+      "realisticMinor": 10000,
+      "highQuartileMinor": null,
+      "liquidityScore": 4.0
+    }
   ]
 }

@@ -37,6 +37,8 @@ export interface StoredLine {
   declared_value_minor: number | null
   declared_value_source: string
   declared_value_confidence: string | null
+  /** Frozen when the card joined the parcel — the prediction worth scoring. */
+  predicted_grade: number | null
   actual_grade: number | null
   cert_number: string | null
   status: string
@@ -211,7 +213,7 @@ export function costSubmission(input: {
       allocated_overhead: 0,
       total_cost: 0,
       allocation_weight: 1,
-      predicted_grade: null,
+      predicted_grade: row.predicted_grade,
       actual_grade: row.actual_grade,
       status: row.status,
       sort_order: row.sort_order,

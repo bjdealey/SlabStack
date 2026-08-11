@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent / "backend"))
 
 from app.money import allocate  # noqa: E402
-from app.services import decision  # noqa: E402
+from app.services import analytics, decision  # noqa: E402
 
 
 def label_for(company_code: str, grade: float) -> str:
@@ -91,6 +91,14 @@ def run(case: dict) -> dict:
     }
 
 
+def run_listing(case: dict) -> dict:
+    """The suggested asking price, which is arithmetic both sides do alone."""
+    asking, basis = analytics.suggested_listing_minor(
+        case["realisticMinor"], case["highQuartileMinor"], case["liquidityScore"]
+    )
+    return {"name": case["name"], "asking_minor": asking, "basis": basis}
+
+
 def run_allocation(case: dict) -> dict:
     """The split itself, where a penny is easiest to lose."""
     parts = allocate(case["totalMinor"], case["weights"])
@@ -108,6 +116,7 @@ if __name__ == "__main__":
         json.dumps(
             {
                 "decisions": [run(case) for case in data["cases"]],
+                "listings": [run_listing(case) for case in data["listings"]],
                 "allocations": [run_allocation(case) for case in data["allocations"]],
             },
             indent=2,

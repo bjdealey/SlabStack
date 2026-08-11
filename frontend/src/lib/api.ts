@@ -7,12 +7,14 @@ import type {
   CardVariant,
   CardWrite,
   CollectionDecisions,
+  CollectionFilter,
   CollectionSummary,
   ConditionAssessment,
   ConditionWrite,
   DataSource,
   EnumsResponse,
   Facets,
+  FilterResult,
   GradeRule,
   GradingCompany,
   Group,
@@ -22,12 +24,15 @@ import type {
   MarketSale,
   MarketSummary,
   Page,
+  RankedOpportunities,
   SaleWrite,
   SellingProfile,
+  SellingQueue,
   OptimiserPlan,
   SettingsResponse,
   SnapshotSeries,
   Submission,
+  SubmissionReturns,
   SubmissionWrite,
 } from './types'
 
@@ -235,6 +240,17 @@ export const api = {
   optimiseSubmissions: (limit?: number) =>
     request<OptimiserPlan>(`/submissions/optimise${query({ limit })}`, { method: 'POST' }),
 
+  // --- Analytics -----------------------------------------------------------
+  // Every one of these is a projection of an answer another engine already
+  // gave. Nothing here computes a verdict, a value or a cost of its own.
+  rankedOpportunities: (batchSize = 1) =>
+    request<RankedOpportunities>(`/analytics/opportunities${query({ batch_size: batchSize })}`),
+  sellingQueue: () => request<SellingQueue>('/analytics/selling-queue'),
+  submissionReturns: () => request<SubmissionReturns>('/analytics/submission-returns'),
+  collectionFilters: () => request<CollectionFilter[]>('/analytics/filters'),
+  applyFilter: (key: string, batchSize = 1) =>
+    request<FilterResult>(`/analytics/filters/${key}${query({ batch_size: batchSize })}`),
+
   // --- Reference data ------------------------------------------------------
   listSets: (q?: string) => request<CardSet[]>(`/sets${query({ q })}`),
   listVariants: () => request<CardVariant[]>('/variants'),
@@ -323,6 +339,11 @@ export const keys = {
   optimiserPlan: (limit?: number) => ['optimiser-plan', limit ?? null] as const,
   summary: ['summary'] as const,
   collectionDecisions: (batchSize = 1) => ['collection-decisions', batchSize] as const,
+  rankedOpportunities: (batchSize = 1) => ['ranked-opportunities', batchSize] as const,
+  sellingQueue: ['selling-queue'] as const,
+  submissionReturns: ['submission-returns'] as const,
+  collectionFilters: ['collection-filters'] as const,
+  filterResult: (key: string, batchSize = 1) => ['filter-result', key, batchSize] as const,
   facets: ['facets'] as const,
   sets: (q?: string) => ['sets', q ?? ''] as const,
   variants: ['variants'] as const,

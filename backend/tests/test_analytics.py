@@ -248,6 +248,56 @@ def build_returned_submission(client: TestClient, actual_grade: float | None) ->
     return submission
 
 
+def test_the_prediction_is_recorded_when_the_card_joins_the_parcel(client: TestClient):
+    """Otherwise "predicted vs actual" has no left-hand side.
+
+    Recorded at add-time and stored, not recomputed on the way out: scoring
+    today's model against a grade it has already seen measures nothing.
+    """
+    submission = build_returned_submission(client, actual_grade=10)
+    line = submission["cards"][0]
+    assert line["predicted_grade"] is not None
+
+    entry = client.get("/api/analytics/submission-returns").json()["submissions"][0]
+    graded = entry["cards"][0]
+    assert graded["predicted_grade"] == line["predicted_grade"]
+    assert graded["surprise"] == round(10 - line["predicted_grade"], 2)
+    assert entry["mean_surprise"] is not None
+
+
+def test_moving_a_draft_to_another_grader_re_takes_the_prediction(client: TestClient):
+    """A PSA prediction is not a CGC one, and a draft has not been sent."""
+    card = make_card(client, "Umbreon VMAX", "215/203")
+    seed_winner(client, card["id"])
+    assess(client, card["id"], left=57, top=56)
+
+    submission = client.post(
+        "/api/submissions",
+        json={"company_id": company_id(client, "CGC"), "card_ids": [card["id"]]},
+    ).json()
+    before = submission["cards"][0]["predicted_grade"]
+
+    moved = client.patch(
+        f"/api/submissions/{submission['id']}",
+        json={"company_id": company_id(client, "PSA")},
+    ).json()
+    after = moved["cards"][0]["predicted_grade"]
+    assert before is not None and after is not None
+    # The graders' ladders differ, so at least the prediction was re-taken
+    # against the new one rather than left describing a parcel you cancelled.
+    assert moved["company_code"] == "PSA"
+
+
+def test_a_card_with_no_assessment_gets_no_invented_prediction(client: TestClient):
+    """No prediction was made, so there is nothing to be right or wrong about."""
+    card = make_card(client, "Unassessed", "1/1")
+    submission = client.post(
+        "/api/submissions",
+        json={"company_id": company_id(client, "CGC"), "card_ids": [card["id"]]},
+    ).json()
+    assert submission["cards"][0]["predicted_grade"] is None
+
+
 def test_a_returned_submission_is_scored_against_what_the_slab_is_worth(client: TestClient):
     build_returned_submission(client, actual_grade=10)
 
@@ -283,6 +333,36 @@ def test_a_grade_with_no_sales_behind_it_cannot_be_valued_and_says_so(client: Te
     graded = entry["cards"][0]
     assert graded["graded_value"] is None
     assert any("cannot be valued" in item for item in graded["blockers"])
+
+
+def test_a_slab_that_cannot_be_valued_makes_the_return_a_floor(client: TestClient):
+    """It still cost money to grade, so the ROI understates rather than errs."""
+    card = make_card(client, "Umbreon VMAX", "215/203")
+    seed_winner(client, card["id"])
+    assess(client, card["id"])
+    unvaluable = make_card(client, "Espeon VMAX", "213/203")
+    seed_winner(client, unvaluable["id"])
+    assess(client, unvaluable["id"])
+
+    submission = client.post(
+        "/api/submissions",
+        json={"company_id": company_id(client, "CGC"), "card_ids": [card["id"], unvaluable["id"]]},
+    ).json()
+    client.patch(f"/api/submissions/{submission['id']}", json={"status": "returned"})
+    lines = {row["card_id"]: row["submission_card_id"] for row in submission["cards"]}
+    client.patch(
+        f"/api/submissions/{submission['id']}/cards/{lines[card['id']]}",
+        json={"actual_grade": 10, "status": "graded"},
+    )
+    # Nobody has sold a CGC 6 of it, so this one cannot be valued.
+    client.patch(
+        f"/api/submissions/{submission['id']}/cards/{lines[unvaluable['id']]}",
+        json={"actual_grade": 6, "status": "graded"},
+    )
+
+    entry = client.get("/api/analytics/submission-returns").json()["submissions"][0]
+    assert entry["roi_pct"] is not None
+    assert "floor, not an estimate" in (entry["status_note"] or "")
 
 
 def test_no_submissions_at_all_says_so(client: TestClient):

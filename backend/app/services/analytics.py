@@ -459,6 +459,17 @@ def submission_returns(db: Session) -> SubmissionReturns:
         if surprises:
             entry.mean_surprise = round(sum(surprises) / len(surprises), 2)
 
+        # A slab nobody has sold still cost money to grade. Its fee is in the
+        # total and its value is not, so the return is a floor rather than an
+        # estimate — and a reader comparing the card rows to the header would
+        # otherwise think the arithmetic was wrong.
+        unvalued = sum(1 for row in entry.cards if row.graded_value is None)
+        if unvalued and entry.roi_pct is not None:
+            entry.status_note = (
+                f"{unvalued} of {entry.graded_count} graded card(s) have no sales at that grade, "
+                "so they cost money here but add no value. The return is a floor, not an estimate."
+            )
+
         result.scored += 1
         result.submissions.append(entry)
 

@@ -381,9 +381,19 @@ def _apply(db, submission: GradingSubmission, payload: SubmissionWrite) -> None:
     if method and method not in {item.value for item in CostAllocationMethod}:
         raise ConflictError(f"'{method}' is not a cost allocation method.")
 
+    moved_grader = bool(data.get("company_id")) and data["company_id"] != submission.company_id
+
     for key, value in data.items():
         if hasattr(submission, key):
             setattr(submission, key, value)
+
+    if moved_grader and submission.status == SubmissionStatus.DRAFT.value:
+        # Re-take the predictions against the grader the parcel is now going to.
+        # A PSA prediction is not a CGC one, and nothing has been sent yet, so
+        # nothing is being scored — this is still the prediction you hold.
+        company = db.get(GradingCompany, submission.company_id)
+        for row in submission.cards:
+            row.predicted_grade = submissions.predicted_grade_for(db, row.card_id, company)
 
 
 # --- Routes ------------------------------------------------------------------
@@ -418,6 +428,7 @@ def create_submission(db: DbSession, payload: SubmissionCreate) -> SubmissionOut
     db.flush()
     _apply(db, submission, payload)
 
+    company = db.get(GradingCompany, payload.company_id)
     for index, card_id in enumerate(payload.card_ids):
         if db.get(Card, card_id) is None:
             raise NotFoundError("Card", card_id)
@@ -427,6 +438,9 @@ def create_submission(db: DbSession, payload: SubmissionCreate) -> SubmissionOut
                 card_id=card_id,
                 tier_id=payload.tier_id,
                 sort_order=index,
+                # Frozen now, not read back later: the prediction worth scoring
+                # is the one you held when you sent the card.
+                predicted_grade=submissions.predicted_grade_for(db, card_id, company),
             )
         )
 
@@ -477,6 +491,7 @@ def add_cards(db: DbSession, submission_id: str, payload: CardAdd) -> Submission
 
     existing = {row.card_id for row in submission.cards}
     next_order = max((row.sort_order for row in submission.cards), default=-1) + 1
+    company = db.get(GradingCompany, submission.company_id) if submission.company_id else None
 
     for card_id in payload.card_ids:
         if db.get(Card, card_id) is None:
@@ -489,6 +504,7 @@ def add_cards(db: DbSession, submission_id: str, payload: CardAdd) -> Submission
                 card_id=card_id,
                 tier_id=payload.tier_id or submission.tier_id,
                 sort_order=next_order,
+                predicted_grade=submissions.predicted_grade_for(db, card_id, company),
             )
         )
         next_order += 1
