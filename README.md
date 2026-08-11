@@ -115,10 +115,14 @@ generated placeholders, not card scans.
 cd frontend && npm run build:demo    # same build the Pages workflow runs
 ```
 
-`.github/workflows/pages.yml` builds and publishes it. **Pages has to be enabled
-once by hand** — Settings → Pages → Build and deployment → Source: **GitHub
-Actions** — because creating a Pages site needs admin rights the workflow's
-`GITHUB_TOKEN` does not have. Every deploy after that is automatic.
+`.github/workflows/pages.yml` builds it and pushes the output to the `gh-pages`
+branch on every change to `frontend/`. That branch is build output — never edit
+it by hand.
+
+It publishes by pushing a branch rather than using `actions/deploy-pages`,
+because that action needs the Pages source set to "GitHub Actions" and changing
+that source needs admin rights the workflow's `GITHUB_TOKEN` does not have. A
+`gh-pages` branch enables Pages on its own and needs only `contents: write`.
 
 The demo code lives in `src/lib/demo/` and is the only place engine logic is
 duplicated. `VITE_DEMO` is a compile-time constant, so a normal build drops the
