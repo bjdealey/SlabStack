@@ -31,7 +31,8 @@ no outbound network call in this build.
 | React dashboard, collection view, card detail page, market panel and settings |
 | **Decision engine** — expected value per route, risk-adjusted, with the route that lost |
 | **Submission optimiser** — real batch costing, and a re-check that the plan still pays |
-| 444 backend tests, engine-parity checks, clean lint, verified end-to-end in a browser |
+| 444 backend tests, engine-parity checks and clean lint, run in CI on every pull request |
+| Verified end-to-end in a browser each phase — most real bugs here were found that way |
 
 Market data comes from sales you enter or import. Network provider adapters are **not** built:
 they need API credentials and each service's terms reviewed, so `POST /api/market/refresh` is the
@@ -75,9 +76,17 @@ origin and no API URL is baked into the build.
 ### Tests
 
 ```bash
-cd backend && pytest && ruff check .
-cd frontend && npm run typecheck && npm run build
+make check
 ```
+
+Backend tests, ruff, the frontend typecheck, both builds, and the engine-parity
+check — the same four things CI runs, in the same order. It uses `backend/.venv`
+when one exists and whatever is on your `PATH` when it does not, so it works
+before `make install` too.
+
+`.github/workflows/ci.yml` runs them on every pull request and every push to
+`main`, split into three jobs so a red X says *which* thing broke: the backend,
+the UI, or the demo drifting away from the server it imitates.
 
 ---
 

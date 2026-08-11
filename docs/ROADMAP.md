@@ -244,6 +244,30 @@ calibration curve can only be earned.
 
 ---
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`, in three jobs:
+
+- **Backend** — ruff, then the test suite, then a check that `docs/schema.sql` still matches the
+  models. A model change that forgets `make schema` leaves the documented schema quietly wrong,
+  which is worse than having no documented schema.
+- **Frontend** — typecheck, the production build, and the *demo* build. The demo is what Pages
+  serves, so without that last step a demo-only break would not surface until the deploy runs,
+  after the merge.
+- **Parity** — `make parity`, comparing the browser port against the server engine field by field.
+
+Three jobs rather than one because the three failures mean different things, and it is worth
+seeing which went red without opening the log. `make check` runs the same set locally; if that
+passes and CI disagrees, one of the two is lying.
+
+**Not covered:** the browser passes. Most of the real bugs in this build were found by driving the
+UI against realistic data — the grade ladder absorbing the lower tail, the pooled-grade trend, the
+mixed-grader best case, the batch-size mislabel, the declared value costing an ineligible tier —
+and none of them would have been caught by a unit test. A Playwright suite in CI would be worth
+having; until then, driving the UI stays part of finishing a phase, not an optional extra.
+
+---
+
 ## Deliberately out of scope
 
 Authentication, cloud hosting, payments, social features, mobile apps. SlabStack binds to
