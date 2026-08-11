@@ -57,7 +57,19 @@ Blocks with nothing behind them yet report `insufficient_data` with a reason you
 
 ## Running it
 
-Two processes: the API on `127.0.0.1:8000` and the UI on `127.0.0.1:5173`.
+Two processes, in two terminals: the API on `127.0.0.1:8000` and the UI on `127.0.0.1:5173`.
+
+```bash
+make install     # venv, pip and npm — once
+make api         # terminal 1
+make ui          # terminal 2
+```
+
+Both run in the foreground, which is why they need a terminal each. There is no database to
+create, no migration to run and no config file to write: the first start builds the database and
+seeds its reference data.
+
+The long way round, if you would rather not use `make`:
 
 ### Backend
 
@@ -83,6 +95,37 @@ npm run dev
 
 Open <http://localhost:5173>. Vite proxies `/api` to the backend, so the browser stays on one
 origin and no API URL is baked into the build.
+
+### Live market data
+
+Off by default. Nothing in this application reaches the internet until you turn a source on.
+
+1. **Settings → Data sources → enable "Pokémon TCG API".** No key, no signup, no approval — it
+   answers anonymously. Set `SLABSTACK_POKEMONTCG_API_KEY` before starting the API if you want the
+   higher rate limit.
+2. **Open a card → "Find in catalogue" → pick the match.** This stores the provider's own id for
+   that card, and a refresh only prices cards it has that id for. Skipping this step is the usual
+   reason a refresh appears to do nothing.
+3. **Settings → Market → Exchange rates.** The provider quotes USD; this app reports one currency.
+   Set `{"USD_GBP": 0.79}` — your number, not a live rate. Without one, prices are fetched and
+   deliberately **not** written, because a guessed rate would rescale every one of them silently.
+4. **Settings → Data sources → "Refresh prices".**
+
+```bash
+make doctor
+```
+
+Walks all four steps plus the network itself and stops at the first thing blocking a sync, with the
+fix. Worth running before assuming something is broken.
+
+**What this source fills, and what it does not.** It gives the card catalogue and an aggregate price
+for the *raw* card. It carries no individual sales and no graded prices, so liquidity stays unknown,
+a trend accrues only forward from the day you start, and **the grade-or-sell decision still needs
+graded comparables** you enter or import. It fills the raw value, not the decision.
+
+**The GitHub Pages demo cannot do any of this.** Pages serves static files, so there is no server to
+make a request from and nothing that persists a page refresh. The demo is for clicking through the
+UI; live data needs the local app.
 
 ### Tests
 
@@ -127,6 +170,13 @@ the Vite dev server when one does not, so the same command works either way.
 **Compose binds to `127.0.0.1` deliberately.** SlabStack has no authentication —
 it is a single-user local application. Changing the port mapping to `8000:8000`
 puts your collection on your network with nothing in front of it.
+
+Live market data is set up the same way either way — see below. Pass a key
+through if you want the higher rate limit:
+
+```bash
+SLABSTACK_POKEMONTCG_API_KEY=your-key docker compose up --build
+```
 
 ---
 
@@ -191,7 +241,7 @@ FastAPI
   ├── selling profiles, settings              (economics)
   ├── evaluation  ← the decision engine
   ├── submissions ← batch costing and the optimiser
-  └── market data providers                   (Phase 3, behind an interface)
+  └── market data providers                   (opt-in, behind an interface)
         │
      SQLite  ← the source of truth
 ```
@@ -312,9 +362,18 @@ had never costed.
 
 ## Data and third parties
 
-Your collection never leaves your machine, and this build makes no outbound network call at all.
-Market data comes from sales you type in or import from a CSV — no network, no key, no terms of
-service. When network providers are added they will use official, permitted APIs under each
-service's terms; a source that requires scraping a site that forbids it does not belong in this
-application. Every network provider ships disabled, and `manual` and `csv` import are what the
-application degrades to.
+Your collection never leaves your machine, and **nothing here makes an outbound call until you
+enable a data source**. Every network provider ships disabled; `manual` and `csv` import need no
+network, no key and no terms of service, and are what the application degrades to.
+
+One provider has an adapter: the Pokémon TCG API, used through its documented, official API. A
+source that required scraping a site that forbids it would not belong in this application, and the
+provider interface exists partly to make that rule enforceable rather than aspirational.
+
+When a source is enabled, what leaves your machine is a card identifier — the provider's own id for
+a card you asked about. No part of your collection, your costs, your decisions or your grading
+history is sent anywhere. Prices come back and are written into your database; every calculation
+still reads only from there, so a provider going away costs future updates and never your history.
+
+API keys are read from named environment variables at call time. The database stores the *name* of
+the variable, never a key, and the API reports only whether one is present.
