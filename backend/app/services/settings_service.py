@@ -339,6 +339,47 @@ SETTING_DEFINITIONS: tuple[SettingDefinition, ...] = (
         minimum=1,
         advanced=True,
     ),
+    # --- Learning (Phase 8) ------------------------------------------------
+    # What the model is allowed to learn from your own returned grades, and how
+    # much evidence it needs first.
+    SettingDefinition(
+        key="calibration_enabled",
+        label="Learn from your graded results",
+        type="boolean",
+        default=True,
+        category="grade_model",
+        description=(
+            "Adjust future predictions using how your cards have actually come back. Turn this "
+            "off to see the raw model only — the measurement is still reported either way."
+        ),
+    ),
+    SettingDefinition(
+        key="calibration_minimum_sample",
+        label="Results needed before correcting",
+        type="integer",
+        default=10,
+        category="grade_model",
+        minimum=1,
+        maximum=500,
+        description=(
+            "Per grading company. Below this the bias is measured and shown but never applied: "
+            "a correction fitted to four slabs is fitted to noise."
+        ),
+    ),
+    SettingDefinition(
+        key="calibration_max_offset",
+        label="Largest correction allowed",
+        type="number",
+        default=1.0,
+        category="grade_model",
+        minimum=0,
+        maximum=3,
+        advanced=True,
+        description=(
+            "Caps how far a learned bias may move a prediction, in grades. A measured two-grade "
+            "bias is far likelier to be a run of odd cards than a real one."
+        ),
+    ),
 )
 
 DEFINITIONS_BY_KEY: dict[str, SettingDefinition] = {d.key: d for d in SETTING_DEFINITIONS}

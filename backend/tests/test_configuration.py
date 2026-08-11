@@ -193,11 +193,17 @@ def test_enums_endpoint_feeds_the_ui(client: TestClient):
     assert "decision" in body["enums"]
 
 
-def test_later_phase_endpoints_report_their_phase(client: TestClient):
-    for path, phase in (("/api/analytics/accuracy", 8),):
-        response = client.get(path)
+def test_the_remaining_stubs_are_the_ones_needing_a_provider(client: TestClient):
+    """Every phased stub has now landed. What is left needs credentials, not code.
+
+    Both remaining 501s wait on an external service and its terms, not on an
+    engine — so they keep reporting the phase that owns them rather than being
+    quietly deleted.
+    """
+    for path, method in (("/api/market/refresh", "post"), ("/api/cards/identify", "post")):
+        response = getattr(client, method)(path)
         assert response.status_code == 501, path
-        assert response.json()["error"]["details"]["phase"] == phase
+        assert response.json()["error"]["details"]["phase"] == 3
 
 
 def test_submissions_are_no_longer_a_later_phase(client: TestClient):
@@ -205,6 +211,13 @@ def test_submissions_are_no_longer_a_later_phase(client: TestClient):
     response = client.get("/api/submissions")
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_accuracy_is_no_longer_a_later_phase(client: TestClient):
+    """Phase 8 landed. The stub has to be gone, not merely shadowed by a real route."""
+    response = client.get("/api/analytics/accuracy")
+    assert response.status_code == 200
+    assert response.json()["status"] == "insufficient_data", "no results yet, honestly reported"
 
 
 def test_analytics_is_no_longer_a_later_phase(client: TestClient):

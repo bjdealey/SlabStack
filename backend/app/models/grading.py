@@ -208,7 +208,17 @@ class SubmissionCard(Base):
     grading_fee_minor: Mapped[int | None] = money_column()
     allocated_overhead_minor: Mapped[int | None] = money_column()
 
+    # Both frozen when the card joined the parcel. The scalar is what the model
+    # called most likely; the distribution is the whole belief, and scoring
+    # needs the whole thing — a Brier score cannot be computed from the mode.
+    # Stored rather than re-derived so that what gets marked is the prediction
+    # actually held at the time, not one recomputed after the grade came back.
     predicted_grade: Mapped[float | None] = mapped_column(Float)
+    # ``none_as_null`` so "no prediction was made" is a real SQL NULL rather
+    # than the JSON text ``null``. Without it the column reads back as None in
+    # Python while ``IS NULL`` never matches, and the count of cards that cannot
+    # be scored silently comes out zero.
+    predicted_probabilities: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
     actual_grade: Mapped[float | None] = mapped_column(Float)
     cert_number: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(

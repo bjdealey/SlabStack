@@ -9,6 +9,7 @@ API — the engines work in integer minor units and convert once, here.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Query, status
@@ -21,7 +22,7 @@ from app.enums import CostAllocationMethod, SubmissionCardStatus, SubmissionStat
 from app.models import Card, GradingCompany, GradingSubmission, GradingTier, SubmissionCard
 from app.money import to_major, to_minor
 from app.schemas.common import ApiModel
-from app.services import optimiser, submissions
+from app.services import calibration, optimiser, submissions
 
 router = APIRouter(prefix="/submissions", tags=["submissions"])
 
@@ -377,6 +378,18 @@ def _apply(db, submission: GradingSubmission, payload: SubmissionWrite) -> None:
     if data.get("status") and data["status"] not in {item.value for item in SubmissionStatus}:
         raise ConflictError(f"'{data['status']}' is not a submission status.")
 
+    # The lifecycle dates are Date columns and arrive as ISO strings, so they
+    # need parsing rather than assigning. Without this the column driver rejects
+    # the string and a perfectly reasonable PATCH fails with a 500.
+    for field_name in ("submitted_at", "received_at", "returned_at"):
+        if field_name in data and isinstance(data[field_name], str):
+            try:
+                data[field_name] = date.fromisoformat(data[field_name][:10])
+            except ValueError as exc:
+                raise ConflictError(
+                    f"'{data[field_name]}' is not a date. Use YYYY-MM-DD."
+                ) from exc
+
     method = data.get("cost_allocation_method")
     if method and method not in {item.value for item in CostAllocationMethod}:
         raise ConflictError(f"'{method}' is not a cost allocation method.")
@@ -393,7 +406,9 @@ def _apply(db, submission: GradingSubmission, payload: SubmissionWrite) -> None:
         # nothing is being scored — this is still the prediction you hold.
         company = db.get(GradingCompany, submission.company_id)
         for row in submission.cards:
-            row.predicted_grade = submissions.predicted_grade_for(db, row.card_id, company)
+            row.predicted_grade, row.predicted_probabilities = submissions.predicted_grade_for(
+                db, row.card_id, company
+            )
 
 
 # --- Routes ------------------------------------------------------------------
@@ -432,15 +447,17 @@ def create_submission(db: DbSession, payload: SubmissionCreate) -> SubmissionOut
     for index, card_id in enumerate(payload.card_ids):
         if db.get(Card, card_id) is None:
             raise NotFoundError("Card", card_id)
+        # Frozen now, not read back later: the prediction worth scoring is the
+        # one you held when you sent the card.
+        likely, distribution = submissions.predicted_grade_for(db, card_id, company)
         db.add(
             SubmissionCard(
                 submission_id=submission.id,
                 card_id=card_id,
                 tier_id=payload.tier_id,
                 sort_order=index,
-                # Frozen now, not read back later: the prediction worth scoring
-                # is the one you held when you sent the card.
-                predicted_grade=submissions.predicted_grade_for(db, card_id, company),
+                predicted_grade=likely,
+                predicted_probabilities=distribution,
             )
         )
 
@@ -498,13 +515,15 @@ def add_cards(db: DbSession, submission_id: str, payload: CardAdd) -> Submission
             raise NotFoundError("Card", card_id)
         if card_id in existing:
             continue
+        likely, distribution = submissions.predicted_grade_for(db, card_id, company)
         db.add(
             SubmissionCard(
                 submission_id=submission.id,
                 card_id=card_id,
                 tier_id=payload.tier_id or submission.tier_id,
                 sort_order=next_order,
-                predicted_grade=submissions.predicted_grade_for(db, card_id, company),
+                predicted_grade=likely,
+                predicted_probabilities=distribution,
             )
         )
         next_order += 1
@@ -543,6 +562,12 @@ def update_card(
 
     for key, value in data.items():
         setattr(row, key, value)
+
+    # Recording the grade is what closes the learning loop, so it happens here
+    # rather than waiting for the user to press something. Idempotent, so
+    # correcting a mistyped grade corrects its score too.
+    db.flush()
+    calibration.record_results_for_submission(db, submission)
 
     db.commit()
     db.refresh(submission)
