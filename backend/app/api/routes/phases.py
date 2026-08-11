@@ -28,16 +28,3 @@ def identify_card() -> None:
         phase=3,
         planned_in="Phase 3 — CardIdentificationProvider abstraction.",
     )
-
-
-@router.post("/market/refresh", summary="Fetch sales from a data provider (Phase 3)")
-def refresh_market() -> None:
-    _stub(
-        "No network market-data provider is connected. Valuation, liquidity and trend are "
-        "built and work today on sales you import: enter them by hand or import a CSV export "
-        "from your marketplace. Provider adapters need an API key and each service's terms "
-        "reviewed, and the local database is the source of truth either way — a provider only "
-        "ever writes into it.",
-        phase=3,
-        planned_in="Phase 3 — MarketDataProvider adapters, once API credentials exist.",
-    )

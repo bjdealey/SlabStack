@@ -61,13 +61,24 @@ class CardMatch:
 
 @dataclass(frozen=True)
 class MarketKey:
-    """Identity + grade being priced."""
+    """Identity + grade being priced.
+
+    ``external_id`` is this card at *that* provider, learned once when the user
+    confirms a catalogue match and kept in ``cards.external_ids``. Without it an
+    adapter would have to re-search by name on every sync — slower, rate-limit
+    hungry, and liable to drift onto a different printing.
+
+    ``variant`` travels because pricing is per printing: a reverse holo and a
+    normal are different markets, and this app keeps them apart everywhere else.
+    """
 
     catalog_key: str
     grade_label: str = "raw"
     company_code: str | None = None
     grade: float | None = None
     currency: str = "GBP"
+    external_id: str | None = None
+    variant: str | None = None
 
 
 @dataclass(frozen=True)

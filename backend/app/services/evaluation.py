@@ -695,7 +695,10 @@ def _build_grading_options_block(
 
 
 def _value_row(
-    row: MarketPrice, company_codes: dict[str, str], premium: float | None
+    row: MarketPrice,
+    company_codes: dict[str, str],
+    premium: float | None,
+    sources: dict[str, tuple[str, str]] | None = None,
 ) -> MarketValueRow:
     return MarketValueRow(
         grade_label=row.grade_label,
@@ -716,6 +719,8 @@ def _value_row(
         confidence=row.confidence,
         premium_vs_raw_pct=premium,
         is_user_override=row.user_value_minor is not None,
+        source_code=(sources or {}).get(row.source_id or "", (None, None))[0],
+        source_name=(sources or {}).get(row.source_id or "", (None, None))[1],
     )
 
 
@@ -749,10 +754,17 @@ def _build_market_block(
         )
 
     company_codes = {company.id: company.code for company in db.scalars(select(GradingCompany))}
+    # Only needed when a price came from somewhere other than your own sales,
+    # which on a collection with sales recorded is never.
+    sources = {
+        row.id: (row.code, row.name)
+        for row in db.scalars(select(DataSource))
+        if any(price.source_id == row.id for price in summary.prices)
+    }
     raw_row = summary.raw
-    raw = _value_row(raw_row, company_codes, None) if raw_row is not None else None
+    raw = _value_row(raw_row, company_codes, None, sources) if raw_row is not None else None
     graded = [
-        _value_row(row, company_codes, market_service.premium_vs_raw_pct(raw_row, row))
+        _value_row(row, company_codes, market_service.premium_vs_raw_pct(raw_row, row), sources)
         for row in summary.graded
     ]
 

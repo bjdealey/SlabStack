@@ -193,17 +193,17 @@ def test_enums_endpoint_feeds_the_ui(client: TestClient):
     assert "decision" in body["enums"]
 
 
-def test_the_remaining_stubs_are_the_ones_needing_a_provider(client: TestClient):
-    """Every phased stub has now landed. What is left needs credentials, not code.
+def test_the_last_stub_is_the_one_needing_a_model_not_an_engine(client: TestClient):
+    """Image identification is all that is left, and it needs a vision provider.
 
-    Both remaining 501s wait on an external service and its terms, not on an
-    engine — so they keep reporting the phase that owns them rather than being
-    quietly deleted.
+    It keeps reporting the phase that owns it rather than being quietly deleted,
+    and it still promises the thing that matters: a suggestion you confirm.
     """
-    for path, method in (("/api/market/refresh", "post"), ("/api/cards/identify", "post")):
-        response = getattr(client, method)(path)
-        assert response.status_code == 501, path
-        assert response.json()["error"]["details"]["phase"] == 3
+    response = client.post("/api/cards/identify")
+    assert response.status_code == 501
+    body = response.json()["error"]
+    assert body["details"]["phase"] == 3
+    assert "never applied" in body["message"]
 
 
 def test_submissions_are_no_longer_a_later_phase(client: TestClient):
@@ -227,10 +227,33 @@ def test_analytics_is_no_longer_a_later_phase(client: TestClient):
     assert response.json()["status"] == "insufficient_data", "empty collection, honestly reported"
 
 
-def test_provider_sync_says_valuation_already_works_without_it(client: TestClient):
-    """A 501 should tell the user what they *can* do, not just what they cannot."""
+def test_refresh_is_real_and_refuses_until_a_source_is_enabled(client: TestClient):
+    """A fresh install makes no network call at all — that is the point.
+
+    Enabling a source is the moment this application first reaches the internet,
+    so it is a decision the user takes rather than a default they discover.
+    """
     response = client.post("/api/market/refresh")
-    assert response.status_code == 501
-    body = response.json()["error"]
-    assert body["details"]["phase"] == 3
-    assert "CSV" in body["message"]
+    assert response.status_code == 409
+    message = response.json()["error"]["message"]
+    assert "No market-data source is enabled" in message
+    assert "nothing here reaches the network until you do" in message
+
+
+def test_enabling_a_source_without_an_adapter_is_refused(client: TestClient):
+    """The disabled rows advertise what is planned, not what can be switched on."""
+    response = client.patch("/api/data-sources/ebay", json={"enabled": True})
+    assert response.status_code == 409
+    assert "has no adapter" in response.json()["error"]["message"]
+
+
+def test_the_free_catalogue_source_ships_ready_to_enable(client: TestClient):
+    """No signup, no approval, no key — the one a user can actually try."""
+    sources = {row["code"]: row for row in client.get("/api/data-sources").json()}
+    row = sources["pokemontcg_io"]
+    assert row["has_adapter"] is True
+    assert row["enabled"] is False, "off until asked for"
+
+    enabled = client.patch("/api/data-sources/pokemontcg_io", json={"enabled": True})
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True

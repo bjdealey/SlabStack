@@ -374,11 +374,26 @@ DATA_SOURCES: tuple[dict, ...] = (
         "code": "pokemontcg_io",
         "name": "Pokémon TCG API",
         "kind": DataSourceKind.CARD_CATALOG.value,
+        "provider_class": "app.services.market_data.pokemontcg.PokemonTcgIoProvider",
         "base_url": "https://api.pokemontcg.io/v2",
         "api_key_env_var": "SLABSTACK_POKEMONTCG_API_KEY",
+        # Off until the user turns it on. Enabling a source is the moment this
+        # application first talks to the internet, and that should be a
+        # decision rather than a default.
         "enabled": False,
         "priority": 80,
-        "notes": "Phase 3 catalogue source for sets, numbers, rarities and images.",
+        "rate_limit_per_minute": 20,
+        "config": {
+            # Works anonymously; a key raises the daily ceiling.
+            "api_key_optional": True,
+            "marketplace": "tcgplayer",
+        },
+        "terms_url": "https://pokemontcg.io/",
+        "notes": (
+            "Card catalogue plus aggregate TCGplayer/Cardmarket prices. No individual sales "
+            "and no graded prices, so liquidity stays unknown and the grading decision still "
+            "needs graded comparables from elsewhere."
+        ),
     },
 )
 

@@ -6,3 +6,5 @@ pydantic==2.11.9
 pydantic-settings==2.11.0
 python-multipart==0.0.20
 Pillow==11.3.0
+# The only outbound HTTP in the build: market-data provider adapters.
+httpx==0.28.1
