@@ -1,0 +1,25 @@
+.git
+.github
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+
+# Never bake a collection into an image.
+data
+backend/data
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite*
+
+.env
+.env.*
+!.env.example
+docs
+*.md
+!README.md

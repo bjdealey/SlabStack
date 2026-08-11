@@ -1,0 +1,43 @@
+# docker compose up --build   ->   http://localhost:8000
+#
+# One service, because SlabStack is one process: the API serves the built UI.
+
+services:
+  slabstack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: slabstack:latest
+    container_name: slabstack
+    restart: unless-stopped
+
+    # Bound to localhost on purpose. SlabStack has no authentication — it is a
+    # single-user local application — so it must not listen on your LAN or the
+    # internet. Changing this to "8000:8000" exposes your collection to anyone
+    # who can reach this machine.
+    ports:
+      - '127.0.0.1:8000:8000'
+
+    # Your collection: the SQLite database and every uploaded image. A host
+    # directory rather than a named volume, so it is easy to find and to back
+    # up — copying ./data is a complete backup.
+    volumes:
+      - ./data:/data
+
+    environment:
+      SLABSTACK_DATA_DIR: /data
+      SLABSTACK_STATIC_DIR: /app/static
+      # Market-data provider keys (Phase 3). Read from the environment, never
+      # stored in the database.
+      # SLABSTACK_POKEPRICE_API_KEY: ${SLABSTACK_POKEPRICE_API_KEY:-}
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
