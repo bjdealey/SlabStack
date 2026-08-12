@@ -55,8 +55,29 @@ def test_it_reads_a_sold_listing():
     assert psa.currency == "GBP"
     assert psa.sale_date == date(2026, 7, 14)
     assert psa.external_id == "v1|294001|0"
-    assert psa.seller == "cardshop_uk"
     assert psa.platform == "eBay"
+
+
+def test_no_seller_username_is_ever_kept():
+    """The declaration eBay makes you sign has to be true.
+
+    A localhost-only app cannot host the account-deletion webhook, so the only
+    route to an active production keyset is declaring that it does not persist
+    eBay user data. A username is the one field here that identifies a person,
+    and nothing in this application reads it — so it is not stored, and the
+    declaration is honest rather than convenient.
+    """
+    fixture_has_one = (recorded.PSA_10.get("seller") or {}).get("username")
+    assert fixture_has_one, "the response really does carry a username to discard"
+
+    sales = provider().sales_for_query(UMBREON)
+    listings = provider().listings_for_query(UMBREON)
+
+    assert all(sale.seller is None for sale in sales)
+    assert all(listing.seller is None for listing in listings)
+    assert not any(
+        fixture_has_one in str(record.raw) for record in [*sales, *listings]
+    ), "and it does not survive in the raw payload either"
 
 
 def test_rows_it_cannot_use_are_dropped_not_zeroed():

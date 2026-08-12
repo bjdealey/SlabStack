@@ -142,6 +142,14 @@ liquidity, which needs actual trades.
 3. From the keyset, export the **App ID** (client id) as `SLABSTACK_EBAY_APP_ID` and the **Cert ID**
    (client secret) as `SLABSTACK_EBAY_CERT_ID`, then restart. The third value, Dev ID, is for the
    legacy Trading API and is not used here.
+
+   On the *Alerts & Notifications* page, choose **Marketplace Account Deletion** and turn on
+   **"Not persisting eBay data"**, then pick the exemption reason and submit. The alternative is
+   hosting a public HTTPS webhook, which an application bound to `127.0.0.1` cannot do. The
+   declaration is accurate: this build records prices, dates, item ids and listing titles — which
+   describe a *listing* — and deliberately discards the seller username, which is the only field
+   that would describe a *person*. A seller name you type on a manual sale is your own record and
+   never came from eBay.
 4. **Settings → Data sources → eBay → Enable**, then **Refresh prices**.
 
 Nothing needs linking: eBay is searched by name, so every card in your collection is eligible
