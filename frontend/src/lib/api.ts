@@ -335,7 +335,13 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
-  lookupCard: (params: { name?: string; set_code?: string; card_number?: string }) =>
+  lookupCard: (params: {
+    name?: string
+    set_code?: string
+    card_number?: string
+    /** Which provider's catalogue to search. Defaults to the card catalogue. */
+    source_code?: string
+  }) =>
     request<CatalogLookup>(`/catalog/lookup${query(params)}`),
   linkCard: (
     cardId: string,

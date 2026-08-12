@@ -425,15 +425,51 @@ returns that shape. **The first live request is the verification, and it happens
 
 ---
 
+## Graded prices ✅
+
+PriceCharting, in `app/services/market_data/pricecharting.py`. The source that finally fills the
+slab side of the grading decision, which every earlier source left empty.
+
+Chosen after eBay's sold data turned out to be unobtainable in practice: it returns the graded
+ladder as named fields for a paid key and no approval committee. A lesser API you can actually have
+beats a better one you cannot.
+
+**The mapping is data, and refuses to be guessed.** PriceCharting is a video-game price guide that
+also covers cards, and it reuses the game condition fields for card grades — `box-only-price` and
+`manual-only-price` hold grades, not boxes and manuals. Which field is which grade is the single
+most important fact about this source and the one thing this build could never verify: the sandbox
+cannot reach the site and the reachable documentation does not spell it out.
+
+So it lives in `grade_fields` on the data source, ships marked unconfirmed, and **no graded price is
+written until a human confirms it**. `make pricecharting-fields CARD="…"` prints what the API
+actually returned beside what the mapping claims, so confirming it is half a minute of comparing
+against the card's own page. The raw price flows regardless, because "loose" is the one label here
+that cannot mean anything else.
+
+That refusal is the whole design. A price under the wrong grade would not fail: it is a real number,
+of the right magnitude, in the right currency, and it would quietly invert the recommendation on
+every card it touched. Returning nothing is strictly better than returning that.
+
+- **Aggregates, not sales.** `sample_size` stays zero and liquidity stays unknown — this answers
+  *what is a slab worth*, never *how easily does it sell*.
+- **Prices are already integers in pennies**, which is what this app stores, so nothing is converted
+  and no penny is lost on the way in.
+- **A bad token answers HTTP 200** with `status: error`, so the adapter checks the body rather than
+  the status code — otherwise every card would report "no prices" forever.
+- **`as_of` is left null.** The response carries the card's *release* date, and dating today's price
+  2021 would be worse than admitting the date is unknown.
+- **Linking is per source.** Cards are matched and linked separately for each provider, and the
+  lookup dialog now picks which one — without that, PriceCharting would have had no route to a card
+  id and would have synced nothing, forever.
+
+---
+
 ## What is left
 
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,
 not an engine — and it will always be a suggestion the user confirms, never applied silently.
 
-**PriceCharting** would still be worth having, for the one thing eBay cannot do: it returns
-PSA 10 / PSA 9 / BGS / CGC prices as named fields, with no title parsing and no 90-day limit. Where
-eBay gives better evidence, that gives better *coverage* — cards that trade too rarely to produce
-sold listings in a 90-day window. It needs a paid key.
+*(PriceCharting is built — see below.)*
 
 The per-card price/volume/liquidity chart is also outstanding — `price_snapshots`,
 `GET /api/cards/{id}/market/history` and `SnapshotSeries` all exist and are exercised; only the

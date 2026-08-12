@@ -1337,7 +1337,7 @@
       "api_key_env_var": "SLABSTACK_PRICECHARTING_API_KEY",
       "enabled": false,
       "priority": 40,
-      "has_adapter": false,
+      "has_adapter": true,
       "api_key_present": false,
       "credentials": [
         {
@@ -1347,8 +1347,8 @@
       ],
       "last_sync_at": null,
       "last_sync_status": null,
-      "terms_url": null,
-      "notes": "Sold prices including PSA 9/10 columns, which would fill the graded ladder the catalogue sources cannot. Needs a paid API key. No adapter written yet."
+      "terms_url": "https://www.pricecharting.com/api-documentation",
+      "notes": "Graded prices as named fields — the only source here that fills the slab side of the grading decision without an approval process. Needs a paid API key. Quotes USD, so an exchange rate is required. Aggregates, not individual sales, so liquidity stays unknown. Check the grade mapping before trusting it: run `make pricecharting-fields` and set grade_fields_confirmed."
     },
     {
       "id": "4bcd5eba00124592a1a6bc88f4e6686e",

@@ -1,4 +1,4 @@
-.PHONY: help install dev api ui test lint check parity schema migrate clean
+.PHONY: help install dev api ui test lint check parity doctor pricecharting-fields schema migrate clean
 
 VENV := backend/.venv
 
@@ -25,6 +25,7 @@ help:
 	@echo "  make parity    Check the demo engine still agrees with the server"
 	@echo "  make check     Everything CI runs"
 	@echo "  make doctor    Diagnose why a live-data sync is not working"
+	@echo "  make pricecharting-fields CARD=\"...\"  Check PriceCharting's grade mapping"
 	@echo "  make schema    Regenerate docs/schema.sql from the models"
 	@echo "  make migrate   Apply Alembic migrations"
 
@@ -67,6 +68,12 @@ check: test lint parity
 # "Nothing happened" has five causes that look identical from the UI.
 doctor:
 	cd backend && $(PY) -m scripts.doctor
+
+# Prints what PriceCharting returned beside what the mapping claims it means.
+# It reuses video-game field names for card grades, and a price under the wrong
+# grade is silent, plausible and inverts the recommendation.
+pricecharting-fields:
+	cd backend && $(PY) -m scripts.pricecharting_fields $(CARD)
 
 schema:
 	cd backend && $(PY) -m scripts.dump_schema

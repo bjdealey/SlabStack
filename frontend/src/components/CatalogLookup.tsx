@@ -32,21 +32,22 @@ const FIELDS = [
  */
 export function CatalogLookup({ card }: { card: Card }) {
   const [open, setOpen] = useState(false)
-  const linked = (card.external_ids ?? {})['pokemontcg_io'] as string | undefined
+  const links = (card.external_ids ?? {}) as Record<string, string>
+  const anyLink = Object.keys(links).length > 0
 
   return (
     <>
       <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
         <Search className="size-3.5" />
-        {linked ? 'Re-link to catalogue' : 'Find in catalogue'}
+        {anyLink ? 'Re-link to a source' : 'Find in catalogue'}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           className="max-w-3xl"
-          title="Find this card in the catalogue"
+          title="Find this card at a provider"
           description="Candidates from the provider. Nothing is changed until you pick one."
         >
-          <LookupBody card={card} linked={linked} onDone={() => setOpen(false)} />
+          <LookupBody card={card} links={links} onDone={() => setOpen(false)} />
         </DialogContent>
       </Dialog>
     </>
@@ -55,20 +56,32 @@ export function CatalogLookup({ card }: { card: Card }) {
 
 function LookupBody({
   card,
-  linked,
+  links,
   onDone,
 }: {
   card: Card
-  linked: string | undefined
+  links: Record<string, string>
   onDone: () => void
 }) {
   const queryClient = useQueryClient()
   const [accept, setAccept] = useState<string[]>(['set_code', 'set_name', 'rarity'])
+  const [source, setSource] = useState('pokemontcg_io')
+
+  // A card is linked per source, not once. Each provider has its own ids, and
+  // a price only syncs from a source that has been told which card this is —
+  // so a card linked to the catalogue and not to PriceCharting gets a raw
+  // price from one and nothing from the other.
+  const sources = useQuery({ queryKey: keys.dataSources, queryFn: api.listDataSources })
+  const searchable = (sources.data ?? []).filter(
+    (row) => row.enabled && row.has_adapter && !['manual', 'csv'].includes(row.code),
+  )
+  const linked = links[source]
 
   const params = {
     name: card.name,
     set_code: card.set_code ?? undefined,
     card_number: card.card_number ?? undefined,
+    source_code: source,
   }
   const lookup = useQuery({
     queryKey: keys.catalogLookup(params),
@@ -79,6 +92,7 @@ function LookupBody({
     mutationFn: (match: CardMatch) =>
       api.linkCard(card.id, {
         external_id: match.external_id,
+        source_code: source,
         apply_fields: accept,
         set_code: match.set_code,
         set_name: match.set_name,
@@ -112,6 +126,28 @@ function LookupBody({
       </PanelHeader>
 
       <PanelBody className="space-y-4">
+        {searchable.length > 1 ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2">
+            <span className="text-xs text-ink-faint">Search:</span>
+            {searchable.map((row) => (
+              <button
+                key={row.code}
+                type="button"
+                onClick={() => setSource(row.code)}
+                className={cn(
+                  'rounded-full border px-2.5 py-1 text-xs transition-colors',
+                  row.code === source
+                    ? 'border-brand bg-brand/10 text-brand'
+                    : 'border-line text-ink-muted hover:border-brand/50',
+                )}
+              >
+                {row.name}
+                {links[row.code] ? ' ·  linked' : ''}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         {lookup.isError ? <ErrorState error={lookup.error} /> : null}
         {lookup.isLoading ? (
           <div className="space-y-2">

@@ -370,13 +370,41 @@ DATA_SOURCES: tuple[dict, ...] = (
         "code": "pricecharting",
         "name": "PriceCharting",
         "kind": DataSourceKind.MARKET_DATA.value,
+        "provider_class": "app.services.market_data.pricecharting.PriceChartingProvider",
         "base_url": "https://www.pricecharting.com",
         "api_key_env_var": "SLABSTACK_PRICECHARTING_API_KEY",
         "enabled": False,
         "priority": 40,
+        "rate_limit_per_minute": 60,
+        "config": {
+            # Which JSON field holds which grade. PriceCharting is a video-game
+            # price guide that also covers cards, and it reuses the game
+            # condition fields for grades — "box-only" and "manual-only" hold
+            # grades, not boxes and manuals.
+            #
+            # This is data rather than code because it is the one fact about
+            # this source that most needs to be correctable without a release,
+            # and because nobody has yet checked it against the site.
+            "grade_fields": {
+                "loose-price": "raw",
+                "graded-price": "PSA 9",
+                "box-only-price": "PSA 9.5",
+                "manual-only-price": "PSA 10",
+                "bgs-10-price": "BGS 10",
+            },
+            # Until a human has compared the two, only the raw price is written.
+            # A graded price under the wrong grade is silent, plausible, and
+            # inverts the recommendation — worse than no price at all.
+            #   make pricecharting-fields CARD="Umbreon VMAX Evolving Skies"
+            "grade_fields_confirmed": False,
+        },
+        "terms_url": "https://www.pricecharting.com/api-documentation",
         "notes": (
-            "Sold prices including PSA 9/10 columns, which would fill the graded ladder the "
-            "catalogue sources cannot. Needs a paid API key. No adapter written yet."
+            "Graded prices as named fields — the only source here that fills the slab side of "
+            "the grading decision without an approval process. Needs a paid API key. Quotes "
+            "USD, so an exchange rate is required. Aggregates, not individual sales, so "
+            "liquidity stays unknown. Check the grade mapping before trusting it: run "
+            "`make pricecharting-fields` and set grade_fields_confirmed."
         ),
     },
     {

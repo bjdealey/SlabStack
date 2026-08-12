@@ -292,7 +292,8 @@ the *name* of the variable, never a key.
 | Source | Needs | Gives |
 | --- | --- | --- |
 | **Pokémon TCG API** | Nothing. Ships **on**. An optional `SLABSTACK_POKEMONTCG_API_KEY` raises the rate limit | Card identity for search-first entry, plus one aggregate price for the **raw** card |
-| **eBay** | `SLABSTACK_EBAY_APP_ID` and `SLABSTACK_EBAY_CERT_ID` from a developer.ebay.com application. Ships **off** | Individual **sold** listings — including slabs, so it fills the **graded** prices the grading decision needs — plus active listings for liquidity |
+| **eBay** | `SLABSTACK_EBAY_APP_ID` and `SLABSTACK_EBAY_CERT_ID` from a developer.ebay.com application. Ships **off** | Individual **sold** listings — including slabs — plus active listings for liquidity. In practice usually **active listings only**: see below |
+| **PriceCharting** | `SLABSTACK_PRICECHARTING_API_KEY` from a paid subscription. Ships **off** | **Graded prices** as named fields — PSA 9, 9.5, PSA 10, BGS 10 — which is the number the grade-or-sell decision actually turns on |
 
 eBay is the one that makes the core question answerable, because grading is a comparison between
 what a card fetches raw and what it fetches in a slab, and only a source with real sales carries
@@ -300,9 +301,32 @@ the second number. Two caveats worth knowing before you set it up: sold data sit
 **Marketplace Insights**, which eBay approves per application (without it the source still records
 active listings), and it covers the last **90 days**.
 
-Run `make doctor` after setting either up. It walks the chain — credentials, eligible cards,
+Run `make doctor` after setting any of them up. It walks the chain — credentials, eligible cards,
 exchange rate, one real request, what has actually landed — and stops at the first thing blocking a
 sync with the fix for it.
+
+### Connecting PriceCharting
+
+Set `SLABSTACK_PRICECHARTING_API_KEY`, enable it in **Settings → Data sources**, then link each card
+to it: open the card, **Find in catalogue**, and choose PriceCharting in the source row. Links are
+per source — a card linked to the card catalogue is not linked to PriceCharting.
+
+**One step you must not skip.** PriceCharting reuses its video-game condition fields for card
+grades: `box-only-price` and `manual-only-price` hold *grades*, not boxes and manuals. Which field
+means which grade is not stated in its documentation, so SlabStack ships the mapping as data, marked
+unconfirmed, and **writes no graded price until you confirm it**:
+
+```bash
+make pricecharting-fields CARD="Umbreon VMAX Evolving Skies"
+```
+
+That prints each price the API returned beside what the mapping claims it is. Open the same card on
+pricecharting.com, compare, and then either set `grade_fields_confirmed: true` in the source's
+config, or correct `grade_fields` there — it is configuration, not code.
+
+Until you do, only the raw price is written. That is deliberate: a price under the wrong grade is a
+real number of the right magnitude in the right currency, and it would silently invert the
+recommendation on every card it touched. Returning nothing is better.
 
 ---
 
