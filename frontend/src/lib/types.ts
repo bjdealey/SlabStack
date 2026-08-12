@@ -1405,6 +1405,54 @@ export interface SyncReport {
   listings_seen: number
 }
 
+/* --- What to assess first ------------------------------------------------- */
+
+/** One unassessed card, and the most grading could possibly gain. */
+export interface AssessmentCandidate {
+  card_id: string
+  name: string
+  set_label: string | null
+  /** `assess`, `skip` or `unknown`. */
+  verdict: string
+  reason: string | null
+  /**
+   * The most grading could add, if the card came back at the best-priced
+   * grade. An upper bound, not a forecast — an assessment can only lower it.
+   */
+  ceiling: number | null
+  /**
+   * False when the best *priced* grade sits below the top of that company's
+   * ladder, which makes the ceiling a bound over the priced grades only. A
+   * negative ceiling proves nothing when this is false.
+   */
+  ceiling_is_complete: boolean
+  company_code: string | null
+  tier_name: string | null
+  grading_cost: number | null
+  best_grade_label: string | null
+  best_net: number | null
+  net_raw_value: number | null
+  liquidity_score: number | null
+  liquidity_band: string | null
+  confidence: Confidence
+}
+
+export interface AssessmentQueue {
+  status: BlockStatus
+  reason: string | null
+  currency: string
+  analysed: number
+  total_cards: number
+  unpriced: number
+  worth_assessing: number
+  ruled_out: number
+  unknown: number
+  truncated: boolean
+  total_ceiling: number | null
+  items: AssessmentCandidate[]
+  notes: string[]
+}
+
 /* --- Collection import ---------------------------------------------------- */
 
 /** One row of a collection export, as we read it, before anything is written. */

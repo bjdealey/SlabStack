@@ -30,11 +30,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.enums import BlockStatus, Confidence, Decision, SubmissionStatus, TrendDirection
-from app.models import Card, GradingSubmission, MarketPrice
+from app.models import Card, ConditionAssessment, GradingCompany, GradingSubmission, MarketPrice
 from app.money import to_major, to_minor
 from app.services import (
     decision as decision_engine,
@@ -53,11 +53,13 @@ _FALLING = {TrendDirection.DOWN.value, TrendDirection.STRONG_DOWN.value}
 
 __all__ = [
     "FILTERS",
+    "AssessmentQueue",
     "CollectionFilter",
     "FilterResult",
     "Opportunities",
     "SellingQueue",
     "SubmissionReturns",
+    "assessment_queue",
     "filter_collection",
     "opportunities",
     "selling_queue",
@@ -682,4 +684,291 @@ def review_due(db: Session, today: date | None = None) -> list[Card]:
         db.scalars(
             select(Card).where(Card.review_after.is_not(None), Card.review_after <= today)
         )
+    )
+
+
+# --- What to assess first ----------------------------------------------------
+
+
+@dataclass
+class AssessmentCandidate:
+    """One unassessed card, and the most grading it could possibly gain."""
+
+    card_id: str
+    name: str
+    set_label: str | None = None
+
+    #: `assess`, `skip` or `unknown`. What to do with your next five minutes.
+    verdict: str = "unknown"
+    reason: str | None = None
+
+    #: The most grading could add, if the card came back at the best-priced
+    #: grade. Not a forecast — an upper bound that no condition can beat.
+    ceiling: float | None = None
+    #: False when the best *priced* grade is below the top of that company's
+    #: ladder, which makes the ceiling a bound over the priced grades only.
+    ceiling_is_complete: bool = False
+
+    company_code: str | None = None
+    tier_name: str | None = None
+    grading_cost: float | None = None
+    best_grade_label: str | None = None
+    best_net: float | None = None
+    net_raw_value: float | None = None
+
+    liquidity_score: float | None = None
+    liquidity_band: str | None = None
+    confidence: str = Confidence.NONE.value
+
+
+@dataclass
+class AssessmentQueue:
+    currency: str = "GBP"
+    #: Cards priced but not yet assessed — the ones this can speak about.
+    analysed: int = 0
+    total_cards: int = 0
+    unpriced: int = 0
+    worth_assessing: int = 0
+    ruled_out: int = 0
+    unknown: int = 0
+    truncated: bool = False
+    #: What assessing the whole queue could be worth, at its ceiling.
+    total_ceiling: float | None = None
+    items: list[AssessmentCandidate] = field(default_factory=list)
+    status: str = BlockStatus.OK.value
+    reason: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+def _unassessed_but_priced(db: Session) -> list[Card]:
+    """The complement of `portfolio._analysable`: priced, not yet looked at."""
+    assessed = select(ConditionAssessment.card_id).where(ConditionAssessment.is_current.is_(True))
+    priced = select(MarketPrice.catalog_key)
+    return list(
+        db.scalars(
+            select(Card)
+            .where(Card.id.not_in(assessed), Card.catalog_key.in_(priced))
+            .order_by(Card.updated_at.desc())
+        )
+    )
+
+
+def assessment_queue(
+    db: Session, *, batch_size: int = 1, limit: int = portfolio.DEFAULT_LIMIT
+) -> AssessmentQueue:
+    """Which unassessed cards are worth the five minutes, and which are not.
+
+    Importing four hundred cards takes a second; assessing four hundred cards
+    does not. The decision engine cannot rank them — it needs an assessment to
+    say anything at all — so the ranking has to come from the one thing already
+    known about every card: what the market pays for it raw, and what it pays
+    for the same card in a slab.
+
+    The measure is a **ceiling**, not a forecast. Take the best-netting grade
+    that has sales behind it, subtract what the card already nets raw and what
+    grading it would cost, and you have the most grading could possibly add —
+    an upper bound that holds however the card turns out. A card whose ceiling
+    is negative cannot be worth grading in any condition, so it can be ruled out
+    without ever being looked at. That is the half of this that saves the time.
+
+    Two honesty rules shape the rest:
+
+    **A bound is only a bound over what is priced.** If the best grade with
+    sales behind it is a 9, a 10 might be worth far more, and a negative ceiling
+    proves nothing. Those cards are `unknown`, not `skip`.
+
+    **Ceilings are computed within one company**, in `_best_case_per_company` —
+    ACE's fee against a PSA slab price describes a route that does not exist.
+    """
+    from app.services import evaluation
+
+    # The user's own bar for what makes grading worth doing, not a second
+    # opinion invented here. A ceiling below it is a card whose *best* case
+    # fails the test they already set, which is as good as a refusal.
+    thresholds = decision_engine.Thresholds.from_settings(settings_service.get_all(db))
+    bar = to_major(thresholds.minimum_absolute_profit_minor) or 0.0
+
+    total_cards = db.scalar(select(func.count()).select_from(Card)) or 0
+    candidates = _unassessed_but_priced(db)
+
+    result = AssessmentQueue(total_cards=total_cards)
+    if len(candidates) > limit:
+        result.truncated = True
+        result.notes.append(
+            f"{len(candidates)} card(s) are priced and unassessed; this ranked the first {limit}, "
+            "most recently updated first."
+        )
+        candidates = candidates[:limit]
+
+    ceiling_minor = 0
+    for card in candidates:
+        evaluated = evaluation.evaluate_card(db, card, batch_size=batch_size)
+        result.currency = evaluated.currency
+        result.analysed += 1
+        item = _assessment_candidate(db, card, evaluated, bar=bar)
+        result.items.append(item)
+
+        if item.verdict == "assess":
+            result.worth_assessing += 1
+            ceiling_minor += to_minor(item.ceiling) or 0
+        elif item.verdict == "skip":
+            result.ruled_out += 1
+        else:
+            result.unknown += 1
+
+    # Priced but unassessed is the population this can speak about; everything
+    # else is waiting on market data, not on you.
+    result.unpriced = max(total_cards - len(_unassessed_but_priced(db)) - _assessed_count(db), 0)
+    result.items.sort(key=lambda item: item.ceiling if item.ceiling is not None else -1e9, reverse=True)
+    result.total_ceiling = to_major(ceiling_minor) if result.worth_assessing else None
+    _summarise_queue(result)
+    return result
+
+
+def _assessed_count(db: Session) -> int:
+    return (
+        db.scalar(
+            select(func.count(func.distinct(ConditionAssessment.card_id))).where(
+                ConditionAssessment.is_current.is_(True)
+            )
+        )
+        or 0
+    )
+
+
+def _assessment_candidate(
+    db: Session, card: Card, evaluated, *, bar: float = 0.0
+) -> AssessmentCandidate:
+    item = AssessmentCandidate(
+        card_id=card.id,
+        name=evaluated.raw.display_name,
+        set_label=evaluated.raw.set_label,
+        liquidity_score=evaluated.liquidity.score,
+        liquidity_band=evaluated.liquidity.band,
+        confidence=evaluated.market.raw.confidence if evaluated.market.raw else Confidence.NONE.value,
+        # What the card already nets if sold as it is — the bar grading has to
+        # clear, and the same figure the card page shows.
+        net_raw_value=evaluated.raw.net_raw_sale_value,
+    )
+
+    priced = [row for row in evaluated.grading_options.best_case if row.upside_vs_raw is not None]
+    if not priced:
+        item.verdict = "unknown"
+        item.reason = _why_no_ceiling(evaluated.grading_options.best_case)
+        return item
+
+    best = max(priced, key=lambda row: row.upside_vs_raw)
+    item.ceiling = best.upside_vs_raw
+    item.company_code = best.company_code
+    item.tier_name = best.tier_name
+    item.grading_cost = best.grading_cost
+    item.best_grade_label = best.best_grade_label
+    item.best_net = best.best_net
+
+    company = db.get(GradingCompany, best.company_id)
+    top_grade = company.grade_scale_max if company else 10.0
+    item.ceiling_is_complete = best.best_grade is not None and best.best_grade >= top_grade
+
+    if best.upside_vs_raw >= bar:
+        item.verdict = "assess"
+        item.reason = (
+            f"At best — a {best.best_grade_label} — grading adds about "
+            f"{best.upside_vs_raw:.2f} over selling it raw. Worth a proper look."
+        )
+    elif item.ceiling_is_complete:
+        # Two different failures, and conflating them would mislead: one card
+        # loses money at its best, the other makes money but not enough to be
+        # worth your bar. Both are settled without looking at the card.
+        item.verdict = "skip"
+        item.reason = (
+            (
+                f"Even a {best.best_grade_label} would come out about "
+                f"{abs(best.upside_vs_raw):.2f} behind selling it raw, once grading is paid for."
+            )
+            if best.upside_vs_raw < 0
+            else (
+                f"Even a {best.best_grade_label} only adds about {best.upside_vs_raw:.2f}, under "
+                f"the {bar:.2f} you asked grading to clear."
+            )
+        ) + " No condition changes that, so there is nothing to assess."
+    else:
+        item.verdict = "unknown"
+        item.reason = (
+            f"The best grade with sales behind it is {best.best_grade_label}, which does not pay. "
+            f"Nothing is stored above it, so a higher grade might — this is not a verdict, it is "
+            "missing prices."
+        )
+    return item
+
+
+def _and_list(names: list[str], joiner: str) -> str:
+    """"A, B or C" rather than "A, B, C" — these reasons are read, not parsed."""
+    if len(names) <= 1:
+        return "".join(names)
+    return f"{', '.join(names[:-1])} {joiner} {names[-1]}"
+
+
+def _why_no_ceiling(rows) -> str:
+    """Name the missing piece, since both causes are fixable and differently so.
+
+    A joined list of every company's complaint buries the one that matters. The
+    two failures are genuinely different work: no graded sales is a data problem
+    solved by syncing a source, while no priced tier is a configuration problem
+    solved in Settings — and a grader whose fees have never been entered will
+    otherwise silently withhold a verdict on every card it could have priced.
+    """
+    unpriced_slabs = sorted(
+        {row.company_code for row in rows if row.reason and "sales stored" in row.reason}
+    )
+    unpriced_tiers = sorted(
+        {row.company_code for row in rows if row.reason and "tier" in row.reason}
+    )
+
+    parts: list[str] = []
+    if unpriced_slabs:
+        parts.append(
+            f"No {_and_list(unpriced_slabs, 'or')} sales are stored, so those slabs cannot be "
+            "priced. Sync a source or import sold listings."
+        )
+    if unpriced_tiers:
+        parts.append(
+            f"{_and_list(unpriced_tiers, 'and')} "
+            f"{'has' if len(unpriced_tiers) == 1 else 'have'} no priced tier configured, so "
+            "grading cannot be costed. Add current fees in Settings → Grading."
+        )
+    if not parts:
+        return "No grading route could be priced for this card."
+    return " ".join(parts)
+
+
+def _summarise_queue(result: AssessmentQueue) -> None:
+    if not result.analysed:
+        result.status = BlockStatus.INSUFFICIENT_DATA.value
+        result.reason = (
+            "Every card is already assessed."
+            if result.total_cards
+            else "There are no cards to rank."
+        )
+        return
+
+    if not result.worth_assessing and not result.ruled_out:
+        result.status = BlockStatus.INSUFFICIENT_DATA.value
+        result.reason = (
+            f"None of the {result.analysed} priced card(s) could be ranked: they have no graded "
+            "sales behind them, so there is no slab price to compare against."
+        )
+    else:
+        result.reason = (
+            f"{result.worth_assessing} of {result.analysed} unassessed card(s) could gain from "
+            f"grading. {result.ruled_out} cannot, whatever condition they are in."
+        )
+
+    if result.unknown:
+        result.notes.append(
+            f"{result.unknown} card(s) could not be ranked — usually no graded sales stored, or "
+            "the only priced grade is below the top of the ladder. Missing prices, not a verdict."
+        )
+    result.notes.append(
+        "These are ceilings, not forecasts: the most grading could add if the card came back at "
+        "the best-priced grade. A real assessment can only bring the number down."
     )

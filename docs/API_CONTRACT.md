@@ -1049,6 +1049,7 @@ survives re-imports and reclassification.
 | POST   | `/api/submissions/optimise`                     | ✅     | Pack the collection into batches that still pay once packed. |
 | GET    | `/api/analytics/opportunities`                  | ✅     | Ranked grading opportunities. |
 | GET    | `/api/analytics/selling-queue`                  | ✅     | Cards to sell raw, with a price to ask. |
+| GET    | `/api/analytics/assessment-queue`               | ✅     | Which unassessed cards are worth the five minutes. |
 | GET    | `/api/analytics/submission-returns`             | ✅     | Predicted grades against the ones that came back. |
 | GET    | `/api/analytics/filters`                        | ✅     | The saved cuts on offer.      |
 | GET    | `/api/analytics/filters/{key}`                  | ✅     | Apply one saved cut.          |
@@ -1210,6 +1211,55 @@ showing the same figure, and the two cannot drift apart because there is only on
 The same verdicts as `/api/collection/decisions`, cut to `grade` and `grade_if_batch_filled` and
 ranked by `opportunity_score`. `batch_size` changes the list: a card that does not pay alone often
 pays in a submission of twenty.
+
+**`GET /api/analytics/assessment-queue`** — query `batch_size`, `limit`.
+
+Importing four hundred cards takes a second; assessing four hundred does not. The decision engine
+cannot rank them — it needs an assessment before it says anything at all — so this ranks on the one
+thing already known about every card: what the market pays for it raw, and what it pays for the same
+card in a slab.
+
+The measure is a **ceiling**, not a forecast: the best-netting grade that has sales behind it, less
+what the card already nets raw, less what grading costs. That is the most grading could possibly
+add, and a real assessment can only bring it down.
+
+```jsonc
+{
+  "status": "ok",
+  "reason": "4 of 7 unassessed card(s) could gain from grading. 1 cannot, whatever condition…",
+  "currency": "GBP", "analysed": 7, "total_cards": 7,
+  "worth_assessing": 4, "ruled_out": 1, "unknown": 2,
+  "total_ceiling": 912.50,
+  "items": [{
+    "card_id": "…", "name": "Umbreon VMAX 215/203",
+    "verdict": "assess",                  // `assess` | `skip` | `unknown`
+    "ceiling": 499.45,
+    "ceiling_is_complete": true,          // false ⇒ the best *priced* grade is not the top grade
+    "company_code": "CGC", "tier_name": "Economy", "grading_cost": 24.60,
+    "best_grade_label": "CGC 10", "best_net": 786.36, "net_raw_value": 263.16,
+    "reason": "At best — a CGC 10 — grading adds about 499.45 over selling it raw…"
+  }],
+  "notes": [ … ]
+}
+```
+
+Three rules decide the verdict:
+
+- **`assess`** — the ceiling clears `minimum_absolute_profit`, the user's own bar. Not a second
+  definition of "worth it" invented here; the same setting the decision engine uses.
+- **`skip`** — the ceiling is below that bar **and** `ceiling_is_complete`. Settled without looking
+  at the card: its best possible outcome already fails the test. The reason distinguishes the two
+  ways that happens — losing money outright, or making some but not enough.
+- **`unknown`** — everything else, and deliberately never `skip`. If the best grade with sales
+  behind it is a 9, a 10 might pay well and a negative ceiling proves nothing. A card with no graded
+  sales at all lands here too, with the missing piece named: no sales stored (sync a source) or no
+  priced tier configured (Settings → Grading), because those are different work.
+
+`batch_size` matters as much here as anywhere else: shipping belongs to the parcel, so a ceiling
+costed at one card is the honest worst case and a fuller batch raises every one of them.
+
+Only cards that are **priced but not yet assessed** are ranked — the exact complement of the
+population `/api/collection/decisions` analyses, so no card appears in both lists.
 
 **`GET /api/analytics/selling-queue`** — query `limit`.
 

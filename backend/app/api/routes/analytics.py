@@ -19,6 +19,7 @@ from pydantic import Field
 from app.api.deps import DbSession
 from app.api.errors import ApiError
 from app.api.routes.collection import OpportunityOut
+from app.enums import Confidence
 from app.schemas.common import ApiModel
 from app.services import analytics, portfolio
 
@@ -149,6 +150,100 @@ def selling_queue(
         total_cards=result.total_cards,
         total_net_proceeds=result.total_net_proceeds,
         items=[SellingCandidateOut(**vars(item)) for item in result.items],
+        notes=result.notes,
+    )
+
+
+# --- What to assess first ----------------------------------------------------
+
+
+class AssessmentCandidateOut(ApiModel):
+    """One unassessed card, and the most grading could possibly gain."""
+
+    card_id: str
+    name: str
+    set_label: str | None = None
+    verdict: str = Field(description="`assess`, `skip` or `unknown`.")
+    reason: str | None = None
+    ceiling: float | None = Field(
+        default=None,
+        description=(
+            "The most grading could add, if the card came back at the best-priced grade. "
+            "An upper bound, not a forecast — an assessment can only bring it down."
+        ),
+    )
+    ceiling_is_complete: bool = Field(
+        default=False,
+        description=(
+            "False when the best *priced* grade sits below the top of that company's ladder, "
+            "which makes the ceiling a bound over the priced grades only."
+        ),
+    )
+    company_code: str | None = None
+    tier_name: str | None = None
+    grading_cost: float | None = None
+    best_grade_label: str | None = None
+    best_net: float | None = None
+    net_raw_value: float | None = None
+    liquidity_score: float | None = None
+    liquidity_band: str | None = None
+    confidence: str = Confidence.NONE.value
+
+
+class AssessmentQueueOut(ApiModel):
+    status: str
+    reason: str | None = None
+    currency: str = "GBP"
+    analysed: int = 0
+    total_cards: int = 0
+    unpriced: int = 0
+    worth_assessing: int = 0
+    ruled_out: int = 0
+    unknown: int = 0
+    truncated: bool = False
+    total_ceiling: float | None = None
+    items: list[AssessmentCandidateOut] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+@router.get(
+    "/assessment-queue",
+    response_model=AssessmentQueueOut,
+    summary="Which unassessed cards are worth the five minutes",
+    description=(
+        "Importing four hundred cards takes a second; assessing four hundred does not. The "
+        "decision engine cannot rank them — it needs an assessment to say anything at all — so "
+        "this ranks on the one thing already known about every card: what the market pays for it "
+        "raw, and what it pays for the same card in a slab.\n\n"
+        "The measure is a **ceiling**, not a forecast. Take the best-netting grade that has sales "
+        "behind it, subtract what the card already nets raw and what grading would cost, and that "
+        "is the most grading could possibly add. A card whose ceiling is negative cannot be worth "
+        "grading in any condition, so it is ruled out without ever being looked at.\n\n"
+        "**A bound is only a bound over what is priced.** If the best grade with sales behind it "
+        "is a 9, a 10 might be worth far more and a negative ceiling proves nothing — those come "
+        "back `unknown`, never `skip`. Ceilings are computed within one company, because pairing "
+        "one grader's fee with another's slab price describes a route that does not exist."
+    ),
+)
+def assessment_queue(
+    db: DbSession,
+    batch_size: Annotated[int, Query(ge=1, le=1000)] = 1,
+    limit: Annotated[int, Query(ge=1, le=2000)] = portfolio.DEFAULT_LIMIT,
+) -> AssessmentQueueOut:
+    result = analytics.assessment_queue(db, batch_size=batch_size, limit=limit)
+    return AssessmentQueueOut(
+        status=result.status,
+        reason=result.reason,
+        currency=result.currency,
+        analysed=result.analysed,
+        total_cards=result.total_cards,
+        unpriced=result.unpriced,
+        worth_assessing=result.worth_assessing,
+        ruled_out=result.ruled_out,
+        unknown=result.unknown,
+        truncated=result.truncated,
+        total_ceiling=result.total_ceiling,
+        items=[AssessmentCandidateOut(**vars(item)) for item in result.items],
         notes=result.notes,
     )
 

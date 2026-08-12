@@ -24,6 +24,7 @@ import type {
   HealthResponse,
   ImportResult,
   MarketPrice,
+  AssessmentQueue,
   CollectionImport,
   Listing,
   MarketSale,
@@ -259,6 +260,8 @@ export const api = {
   rankedOpportunities: (batchSize = 1) =>
     request<RankedOpportunities>(`/analytics/opportunities${query({ batch_size: batchSize })}`),
   sellingQueue: () => request<SellingQueue>('/analytics/selling-queue'),
+  assessmentQueue: (batchSize = 1) =>
+    request<AssessmentQueue>(`/analytics/assessment-queue${query({ batch_size: batchSize })}`),
   submissionReturns: () => request<SubmissionReturns>('/analytics/submission-returns'),
   collectionFilters: () => request<CollectionFilter[]>('/analytics/filters'),
   applyFilter: (key: string, batchSize = 1) =>
@@ -398,6 +401,7 @@ export const keys = {
   collectionDecisions: (batchSize = 1) => ['collection-decisions', batchSize] as const,
   rankedOpportunities: (batchSize = 1) => ['ranked-opportunities', batchSize] as const,
   sellingQueue: ['selling-queue'] as const,
+  assessmentQueue: (batchSize = 1) => ['assessment-queue', batchSize] as const,
   submissionReturns: ['submission-returns'] as const,
   collectionFilters: ['collection-filters'] as const,
   accuracy: ['accuracy'] as const,
