@@ -503,6 +503,7 @@ CREATE TABLE market_prices (
 	realistic_sale_minor INTEGER, 
 	quick_sale_minor INTEGER, 
 	sample_size INTEGER NOT NULL, 
+	annual_volume INTEGER, 
 	window_days INTEGER, 
 	last_sale_at DATE, 
 	confidence VARCHAR(16) NOT NULL, 

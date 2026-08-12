@@ -179,6 +179,14 @@ class MarketPrice(Base, TimestampMixin):
     quick_sale_minor: Mapped[int | None] = money_column()
 
     sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: Yearly units sold, when a source reports it. A *count*, not evidence of
+    #: what anything sold for — it feeds liquidity and nothing else, and it is
+    #: deliberately not turned into rows in ``market_sales``, where an invented
+    #: date would corrupt trend, valuation and the outlier fence at once.
+    #:
+    #: Describes the whole product, pooled across grades, which is the shape
+    #: liquidity is already measured at.
+    annual_volume: Mapped[int | None] = mapped_column(Integer)
     window_days: Mapped[int | None] = mapped_column(Integer)
     last_sale_at: Mapped[date | None] = mapped_column(Date)
     confidence: Mapped[str] = mapped_column(String(16), nullable=False, default=Confidence.NONE.value)

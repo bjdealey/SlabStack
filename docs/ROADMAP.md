@@ -464,6 +464,35 @@ every card it touched. Returning nothing is strictly better than returning that.
 
 ---
 
+## Liquidity, finally measurable ✅
+
+Liquidity had read **unknown** on every card, from every source, since Phase 3 — while being one of
+the five components of the Grading Opportunity Score. The score was running on four.
+
+PriceCharting's `sales-volume` is the first number any obtainable source has offered that measures
+the thing directly: yearly units sold. It describes the *product*, pooled across grades, which is
+exactly the shape liquidity is already measured at, so it needs no attribution and gets none.
+
+- **A count, not sales.** It is stored in its own column and deliberately *not* expanded into rows
+  in `market_sales`. A derived sale with an invented date would corrupt trend, valuation and the
+  outlier fence at once, to answer a question none of them asked.
+- **Your own sales win**, the same precedence prices follow and for the same reason: they carry a
+  date each, so they answer both how often a card trades *and* whether it traded recently.
+- **The reading says which evidence it used.** `basis` is `sales` or `reported_volume`, and the
+  card page renders them differently — the windowed counts are hidden for a derived reading,
+  because they count sales *you* hold and this never looked at those.
+- **The counts stay at zero.** Deriving `sales_90d` from an annual figure would turn a derivation
+  into a claim about the user's data.
+
+**Learned the hard way, by driving the UI.** The first version produced a confident **10.0 "very
+liquid"** from a single number. Normalising over the components that exist makes a *partial* reading
+easier to max out than a complete one — with sales you need frequency and recency both perfect to
+reach ten; with a yearly count you need only frequency. A reading with no recency behind it is now
+capped one notch below `very_liquid`, which in this application means *you can realise the money
+now* — precisely what recency evidences and an annual total cannot.
+
+---
+
 ## What is left
 
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,

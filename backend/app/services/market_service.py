@@ -276,6 +276,16 @@ class Liquidity:
     median_days_between_sales: float | None = None
     sales_per_month: float | None = None
 
+    #: Which evidence the score rests on: ``sales`` for your own records,
+    #: ``reported_volume`` for a source's annual count. Worth stating, because
+    #: the two answer different halves of the question and the second cannot
+    #: answer recency at all.
+    basis: str | None = None
+    #: Yearly units sold, as reported. Shown alongside your own sales when both
+    #: exist, because they are independent readings and disagreement is
+    #: information.
+    annual_volume: int | None = None
+
 
 def _band(score: float) -> str:
     if score >= 9:
@@ -290,16 +300,31 @@ def _band(score: float) -> str:
 
 
 def measure_liquidity(
-    sales: list[MarketSale], *, today: date, active_listings: int | None = None
+    sales: list[MarketSale],
+    *,
+    today: date,
+    active_listings: int | None = None,
+    annual_volume: int | None = None,
 ) -> Liquidity:
     """How readily this actually trades.
 
     The point of this number is to stop "PSA 10 = £600" from being read as "you
     can get £600" (spec section 17).
+
+    Two kinds of evidence, and your own sales win — the same precedence prices
+    follow, for the same reason. Sales you recorded carry a date each, so they
+    answer both halves of the question: how *often* this trades and whether it
+    traded *recently*.
+
+    ``annual_volume`` is a source's count of yearly units sold. It answers the
+    first half better than a thin local sample ever could — a year of the whole
+    market against your handful of rows — and the second half not at all. So it
+    is used only where there are no sales to use, and the reading says so.
     """
-    result = Liquidity(active_listings=active_listings)
+    result = Liquidity(active_listings=active_listings, annual_volume=annual_volume)
     if not sales:
-        return result
+        return _from_reported_volume(result, annual_volume)
+    result.basis = "sales"
 
     def count_since(days: int) -> int:
         cutoff = today - timedelta(days=days)
@@ -329,6 +354,56 @@ def measure_liquidity(
     total_weight = sum(weight for _, weight in components)
     score = sum(value * weight for value, weight in components) / total_weight
     result.score = round(min(max(score, 0.0), 10.0), 1)
+    result.band = _band(result.score)
+    return result
+
+
+#: The most a reading with no recency behind it may score — one notch under
+#: ``very_liquid``, which begins at 9.
+#:
+#: Not timidity. Normalising over the components that exist makes a *partial*
+#: reading easier to max out than a complete one: with sales you need frequency
+#: and recency both perfect to reach ten, and with a yearly count you need only
+#: frequency. Driving the UI produced a confident 10.0 "very liquid" from one
+#: number, which is the wrong shape of claim however good that number is.
+#:
+#: "Very liquid" in this application means you can realise the money now, and
+#: that is exactly what recency would evidence and an annual total cannot.
+_NO_RECENCY_CEILING = 8.9
+
+
+def _from_reported_volume(result: Liquidity, annual_volume: int | None) -> Liquidity:
+    """Score frequency alone, from a source's yearly count.
+
+    The counts stay at zero and that is deliberate: ``sales_90d`` means "sales
+    of this card that you hold records for", and filling it from an annual
+    figure would turn a derivation into a claim about your data. What gets
+    derived is the *reading*, and it is labelled as derived.
+
+    Recency is simply absent. An annual total cannot distinguish a card selling
+    steadily all year from one that sold forty times in January and has not
+    moved since — so the score is computed over the components that do exist,
+    exactly as it already is when active listings are unknown, and nothing is
+    invented to stand in for the missing one.
+    """
+    if annual_volume is None:
+        return result
+
+    result.basis = "reported_volume"
+    result.sales_per_month = round(annual_volume / 12, 2)
+    result.median_days_between_sales = round(365 / annual_volume, 1) if annual_volume else None
+
+    # The frequency anchors are calibrated on a 90-day count, so the annual
+    # figure is put on that scale rather than the anchors being duplicated.
+    implied_90d = annual_volume * 90 / 365
+    components = [(_interpolate(FREQUENCY_ANCHORS, implied_90d), 0.45)]
+    if result.active_listings:
+        result.sold_to_active_ratio = round(implied_90d / result.active_listings, 3)
+        components.append((_interpolate(DEPTH_ANCHORS, result.sold_to_active_ratio), 0.20))
+
+    total_weight = sum(weight for _, weight in components)
+    score = sum(value * weight for value, weight in components) / total_weight
+    result.score = round(min(max(score, 0.0), _NO_RECENCY_CEILING), 1)
     result.band = _band(result.score)
     return result
 
@@ -744,13 +819,24 @@ def summarise(
         .where(MarketListing.catalog_key == catalog_key, MarketListing.is_active.is_(True))
     )
 
+    # Reported per product rather than per grade, which is the shape liquidity
+    # is measured at. Taken from whichever row carries it; every row a source
+    # writes for one card carries the same figure.
+    volume = db.scalar(
+        select(func.max(MarketPrice.annual_volume)).where(
+            MarketPrice.catalog_key == catalog_key
+        )
+    )
+
     computed = [row.computed_at for row in prices if row.computed_at is not None]
     for_trend, _label = trend_sales(sales)
     return MarketSummary(
         catalog_key=catalog_key,
         currency=currency,
         prices=prices,
-        liquidity=measure_liquidity(sales, today=today, active_listings=listings or None),
+        liquidity=measure_liquidity(
+            sales, today=today, active_listings=listings or None, annual_volume=volume
+        ),
         trend=measure_trend(for_trend, today=today, params=params),
         sale_count=len(sales),
         excluded_count=excluded,

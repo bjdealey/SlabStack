@@ -254,6 +254,18 @@ class LiquidityOut(ApiModel):
     sold_to_active_ratio: float | None = None
     median_days_between_sales: float | None = None
     sales_per_month: float | None = None
+    basis: str | None = Field(
+        default=None,
+        description="Which evidence the score rests on. `sales` means your own records, which "
+        "carry dates and so answer both how often this trades and whether it traded recently. "
+        "`reported_volume` means a source's yearly unit count, which answers the first and "
+        "cannot answer the second at all.",
+    )
+    annual_volume: int | None = Field(
+        default=None,
+        description="Yearly units sold, where a source reports it. Shown alongside your own "
+        "sales when both exist — they are independent readings, and disagreement is information.",
+    )
 
 
 class TrendOut(ApiModel):

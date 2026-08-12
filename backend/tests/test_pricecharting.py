@@ -385,3 +385,89 @@ def test_a_mapping_you_edited_is_never_overwritten(db, client):
     db.refresh(source)
 
     assert source.config["grade_fields"] == mine
+
+
+def test_the_documented_key_table_is_the_whole_ladder(db, client):
+    """Nine grades, and the tenth does not exist to be had.
+
+    PriceCharting's "Description of Keys" table is the complete list of what
+    /api/product and the CSV return. ACE 10 and TAG 10 are on the website and
+    are not in it at any subscription tier — so an ACE route, the cheapest
+    grader this app supports, can never be priced from this source. Better to
+    have that asserted here than rediscovered as a puzzling blank.
+    """
+    from sqlalchemy import select
+
+    from app.models import DataSource
+
+    source = db.scalar(select(DataSource).where(DataSource.code == "pricecharting"))
+    labels = set(source.config["grade_fields"].values())
+
+    assert labels == {
+        "raw", "PSA 7", "PSA 8", "PSA 9", "PSA 9.5", "PSA 10", "BGS 10", "CGC 10", "SGC 10"
+    }
+    assert not any(label.startswith(("ACE", "TAG")) for label in labels)
+
+
+def test_the_rate_limit_leaves_room_under_one_call_a_second():
+    """Exceeding it is not throttled — the documentation says revoked."""
+    from app.services.market_data import pricecharting as module
+
+    assert module.DEFAULT_RATE_LIMIT < 60
+
+
+# --- Yearly volume, which is what makes liquidity knowable -------------------
+
+
+def test_the_yearly_sales_volume_is_read():
+    """Not a price and not a sample size: how often the card trades."""
+    point = provider().get_current_price(key("raw"))
+    assert point.annual_volume == 312
+    assert point.sample_size == 0, "still zero — this price rests on no sales of yours"
+
+
+def test_a_product_with_no_volume_reports_none_rather_than_zero():
+    """None is "the source did not say"; zero would be "nothing sold all year"."""
+    adapter = provider(transport=recorded.transport(recorded.RAW_ONLY))
+    assert adapter.get_current_price(key("raw", "2513100")).annual_volume is None
+
+
+def test_the_volume_reaches_liquidity_through_a_sync(db, client, pc_source, monkeypatch):
+    """End to end: the API's count becomes a liquidity score on the card.
+
+    Liquidity had read "unknown" on every card in this build, from every source,
+    while being one of the five components of the decision score.
+    """
+    from app.models import Card
+    from app.services import market_service
+
+    card_id = linked_card(client, db, pc_source)
+    run_sync(db, pc_source, monkeypatch, confirmed=True)
+    db.commit()
+
+    key_value = db.get(Card, card_id).catalog_key
+    summary = market_service.summarise(
+        db, key_value, params=market_service.MarketParameters(), currency="GBP"
+    )
+
+    assert summary.liquidity.annual_volume == 312
+    assert summary.liquidity.basis == "reported_volume"
+    assert summary.liquidity.score is not None
+    assert summary.liquidity.band != "unknown"
+
+
+def test_the_card_page_says_the_score_came_from_a_source_not_your_sales(
+    db, client, pc_source, monkeypatch
+):
+    """A score with no sales behind it must not read like one that has them."""
+    card_id = linked_card(client, db, pc_source)
+    run_sync(db, pc_source, monkeypatch, confirmed=True)
+    db.commit()
+
+    block = client.get(f"/api/cards/{card_id}/evaluation").json()["liquidity"]
+
+    assert block["basis"] == "reported_volume"
+    assert block["annual_volume"] == 312
+    assert block["status"] == "partial"
+    assert "recently" in block["reason"], "the half it cannot answer is named"
+    assert "0 sale(s)" not in (block["reason"] or ""), "never 'based on 0 sales'"

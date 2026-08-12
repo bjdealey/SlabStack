@@ -125,6 +125,13 @@ class PricePoint:
     currency: str = "GBP"
     as_of: date | None = None
     sample_size: int = 0
+    #: Yearly units sold, where the source reports it.
+    #:
+    #: Kept apart from ``sample_size`` on purpose, and the distinction matters:
+    #: ``sample_size`` is how many sales this *price* was computed from, and
+    #: stays zero for an aggregate. This is how often the card *trades*, which
+    #: is a different question and the only one liquidity asks.
+    annual_volume: int | None = None
     raw: dict = field(default_factory=dict)
 
 

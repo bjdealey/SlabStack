@@ -273,10 +273,64 @@ function band(score: number): string {
   return 'very_illiquid'
 }
 
+/**
+ * Score frequency alone, from a source's yearly count.
+ *
+ * The counts stay at zero deliberately: `sales_90d` means "sales you hold
+ * records for", and filling it from an annual figure would turn a derivation
+ * into a claim about your data. What gets derived is the reading, and it says
+ * so.
+ *
+ * Recency is simply absent — an annual total cannot tell a card selling
+ * steadily all year from one that sold forty times in January and has not moved
+ * since. The score is computed over the components that exist, exactly as it
+ * already is when active listings are unknown.
+ */
+/**
+ * The most a reading with no recency behind it may score — one notch under
+ * `very_liquid`, which begins at 9.
+ *
+ * Normalising over the components that exist makes a partial reading easier to
+ * max out than a complete one: with sales you need frequency and recency both
+ * perfect to reach ten, and with a yearly count you need only frequency. "Very
+ * liquid" here means you can realise the money now, which is precisely what
+ * recency would evidence and an annual total cannot.
+ */
+const NO_RECENCY_CEILING = 8.9
+
+function fromReportedVolume(
+  result: MarketLiquidity,
+  annualVolume: number | null,
+): MarketLiquidity {
+  if (annualVolume === null) return result
+
+  result.basis = 'reported_volume'
+  result.sales_per_month = Math.round((annualVolume / 12) * 100) / 100
+  result.median_days_between_sales = annualVolume
+    ? Math.round((365 / annualVolume) * 10) / 10
+    : null
+
+  // The frequency anchors are calibrated on a 90-day count, so the annual
+  // figure is put on that scale rather than the anchors being duplicated.
+  const implied90d = (annualVolume * 90) / 365
+  const components: [number, number][] = [[interpolate(FREQUENCY_ANCHORS, implied90d), 0.45]]
+  if (result.active_listings) {
+    result.sold_to_active_ratio = Math.round((implied90d / result.active_listings) * 1000) / 1000
+    components.push([interpolate(DEPTH_ANCHORS, result.sold_to_active_ratio), 0.2])
+  }
+
+  const weight = components.reduce((sum, [, share]) => sum + share, 0)
+  const score = components.reduce((sum, [value, share]) => sum + value * share, 0) / weight
+  result.score = Math.round(Math.min(Math.max(score, 0), NO_RECENCY_CEILING) * 10) / 10
+  result.band = band(result.score)
+  return result
+}
+
 export function measureLiquidity(
   sales: MarketSale[],
   today: string,
   activeListings: number | null = null,
+  annualVolume: number | null = null,
 ): MarketLiquidity {
   const blank: MarketLiquidity = {
     score: null,
@@ -290,8 +344,13 @@ export function measureLiquidity(
     sold_to_active_ratio: null,
     median_days_between_sales: null,
     sales_per_month: null,
+    basis: null,
+    annual_volume: annualVolume,
   }
-  if (!sales.length) return blank
+  // Your own sales win, the same precedence prices follow. They carry a date
+  // each, so they answer both how often this trades and whether it traded
+  // recently; a yearly count answers the first better and the second not at all.
+  if (!sales.length) return fromReportedVolume(blank, annualVolume)
 
   const within = (days: number) =>
     sales.filter((sale) => daysBetween(today, sale.sale_date) <= days).length
@@ -304,6 +363,7 @@ export function measureLiquidity(
 
   const result: MarketLiquidity = {
     ...blank,
+    basis: 'sales',
     sales_7d: within(7),
     sales_30d: within(30),
     sales_90d: within(90),

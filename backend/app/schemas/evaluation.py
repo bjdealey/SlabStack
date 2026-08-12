@@ -201,6 +201,10 @@ class LiquidityBlock(EvaluationBlock):
     sold_to_active_ratio: float | None = None
     median_days_between_sales: float | None = None
     sales_per_month: float | None = None
+    #: `sales` (your own records, which carry dates) or `reported_volume` (a
+    #: source's yearly count, which cannot speak to recency).
+    basis: str | None = None
+    annual_volume: int | None = None
 
 
 class TrendBlock(EvaluationBlock):

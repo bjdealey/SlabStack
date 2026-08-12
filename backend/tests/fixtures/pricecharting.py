@@ -45,6 +45,9 @@ UMBREON = {
     "bgs-10-price": 507680,
     "condition-17-price": 286515,
     "condition-18-price": 113600,
+    # Yearly units sold — the only number any source in this build has offered
+    # that measures how often a card trades rather than what it fetches.
+    "sales-volume": 312,
 }
 
 #: Priced raw, and nothing above it. Very common: most cards are not graded

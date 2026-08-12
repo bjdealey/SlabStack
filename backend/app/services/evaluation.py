@@ -817,19 +817,35 @@ def _build_liquidity_block(summary: market_service.MarketSummary) -> LiquidityBl
         return LiquidityBlock(
             status=BlockStatus.INSUFFICIENT_DATA.value,
             phase=PHASE_MARKET,
-            reason="Liquidity needs sales history. No comparable sales are stored for this card.",
+            reason=(
+                "Liquidity needs sales history, or a source that reports how often the card "
+                "sells. Neither is stored for this card."
+            ),
         )
-    # A liquidity score from three sales is a description of three sales.
-    status = (
-        BlockStatus.OK.value if liquidity.sales_365d >= 6 else BlockStatus.PARTIAL.value
-    )
-    return LiquidityBlock(
-        status=status,
-        reason=(
+
+    if liquidity.basis == "reported_volume":
+        # Never "based on 0 sales in a year", which is what the sales-count test
+        # below would have said about a reading that never looked at your sales.
+        status = BlockStatus.PARTIAL.value
+        reason = (
+            f"From {liquidity.annual_volume} reported sale(s) a year rather than sales you "
+            "hold. That measures how often this trades; it cannot say whether it traded "
+            "recently, so the score covers frequency alone."
+        )
+    else:
+        # A liquidity score from three sales is a description of three sales.
+        status = BlockStatus.OK.value if liquidity.sales_365d >= 6 else BlockStatus.PARTIAL.value
+        reason = (
             None
             if status == BlockStatus.OK.value
             else f"Based on {liquidity.sales_365d} sale(s) in a year — a thin basis for a score."
-        ),
+        )
+
+    return LiquidityBlock(
+        status=status,
+        reason=reason,
+        basis=liquidity.basis,
+        annual_volume=liquidity.annual_volume,
         score=liquidity.score,
         band=liquidity.band,
         sales_7d=liquidity.sales_7d,
