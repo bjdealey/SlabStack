@@ -24,6 +24,7 @@ import type {
   HealthResponse,
   ImportResult,
   MarketPrice,
+  Listing,
   MarketSale,
   MarketSummary,
   Page,
@@ -283,6 +284,7 @@ export const api = {
     request<MarketSale[]>(
       `/cards/${cardId}/market/sales${query({ include_excluded: includeExcluded })}`,
     ),
+  cardListings: (cardId: string) => request<Listing[]>(`/cards/${cardId}/market/listings`),
   createSale: (cardId: string, payload: SaleWrite) =>
     request<MarketSale>(`/cards/${cardId}/market/sales`, {
       method: 'POST',
@@ -381,6 +383,7 @@ export const keys = {
   condition: (id: string) => ['condition', id] as const,
   market: (id: string) => ['market', id] as const,
   sales: (id: string) => ['sales', id] as const,
+  listings: (id: string) => ['listings', id] as const,
   marketHistory: (id: string) => ['market-history', id] as const,
   submissions: ['submissions'] as const,
   submission: (id: string) => ['submission', id] as const,

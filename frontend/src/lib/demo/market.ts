@@ -1122,6 +1122,8 @@ export function summarise(
   prices: MarketPrice[],
   params: MarketParameters,
   currency: string,
+  /** How many copies are listed unsold. The server counts rows; the demo is told. */
+  activeListings: number | null = null,
 ): MarketSummary {
   if (!catalogKey) {
     return {
@@ -1149,7 +1151,7 @@ export function summarise(
     prices: forKey,
     // Liquidity spans every grade: a card whose slabs rarely appear but whose
     // raw copies sell weekly still trades.
-    liquidity: measureLiquidity(usable, today),
+    liquidity: measureLiquidity(usable, today, activeListings),
     trend: measureTrend(trendSales(usable).sales, today, params),
     sale_count: usable.length,
     excluded_count: mine.length - usable.length,

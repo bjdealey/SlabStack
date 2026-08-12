@@ -554,15 +554,53 @@ the rest is that a dry run writes nothing.
 
 ---
 
+## Active listings, finally visible ✅
+
+Listings have been fetched and stored since the eBay adapter shipped, feeding one number — the
+sold-to-active ratio — and nothing ever showed them. A card page could say *"12 listed unsold"* and
+never what those twelve were asking, which is the half of the question that decides whether your
+copy sells this month or sits.
+
+`ActiveListings.tsx` draws them, and as usual most of the work was in what it refuses to imply.
+
+- **An asking price is not a sale.** Rendered as a price ladder beside the valuation it would read
+  as corroboration, when an *unsold* listing is closer to the opposite. Each grade instead says how
+  its cheapest ask compares to what that grade actually sells for — the one inference on the panel,
+  and the one that serves the spec's first principle rather than undermining it.
+- **Grades are separate markets.** Listings are stored per identity, pooled across grades, so an
+  ungrouped list puts a slabbed 10 at £900 three rows above a raw copy at £40 and invites the
+  average. Same error as the pooled-grade trend in Phase 3, grouped for the same reason.
+- **Unstated postage is not free postage.** `total_ask` is absent unless postage is known, so no
+  total is ever a price with a guess inside it.
+- **The evidence is dated.** Listings end; past a week the panel says how old the fetch is instead
+  of presenting it as the current market.
+
+**Learned the hard way, by driving it — three times over.** The comparison against realised prices
+never rendered at all, because the mount gated on `market.status === 'ok'` and a real card's market
+is usually `partial`; a status stricter than the data quietly deleted the most useful line on the
+panel. Every auction read *"ends today"*, because `relativeTime` is past-only and a future timestamp
+lands in its first branch — an auction closing in three weeks looked as urgent as one closing in an
+hour. And the cheapest raw "ask" turned out to be a live auction bid: an unfinished result, usually
+rising, being read as the cheapest price a rival was offering. Fixed-price and auction listings are
+now summarised separately, and a bid is labelled as one.
+
+The demo turned out to have been building a per-card count of unsold listings since Phase 3 and
+never reading it, so its liquidity had no supply term at all where the server's does. Wired up while
+the surrounding code was open.
+
+---
+
 ## What is left
 
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,
 not an engine — and it will always be a suggestion the user confirms, never applied silently.
 
-Active listings are fetched and stored but barely surfaced: `GET /api/cards/{id}/market/listings`
-returns them and the sold-to-active ratio feeds liquidity, yet nothing lists them for a card. A
-PriceCharting CSV import (their Legendary tier ships the whole price guide as a file) would beat
-searching card by card for a real collection, and is the obvious next thing after this.
+A PriceCharting CSV import (their Legendary tier ships the whole price guide as a file) would beat
+searching card by card for a real collection, and is the obvious next thing.
+
+The `doctor` script's Configuration section still hardcodes eBay's two environment variables, so a
+misconfigured PriceCharting key shows up as silence rather than as a problem. It should read the
+variables each source declares.
 
 ---
 

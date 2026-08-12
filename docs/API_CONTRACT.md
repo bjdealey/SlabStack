@@ -724,7 +724,7 @@ insure the slab for — and clearing it restores the engine's suggestion.
 | POST   | `/api/cards/{id}/market/sales/import`       | ✅     | CSV import, deduped and filtered.              |
 | POST   | `/api/cards/{id}/market/reclassify`         | ✅     | Re-run the exclusion filters.                  |
 | GET    | `/api/cards/{id}/market/history`            | ✅     | Daily `price_snapshots`, one series per grade. |
-| GET    | `/api/cards/{id}/market/listings`           | ✅     | Active unsold listings.                        |
+| GET    | `/api/cards/{id}/market/listings`           | ✅     | Active unsold listings, grouped by grade.      |
 | GET    | `/api/market/sales?catalog_key=…`           | ✅     | Sales for an identity, with no card in hand.   |
 | PATCH  | `/api/market/sales/{sale_id}`               | ✅     | Correct a stored sale.                         |
 | PUT    | `/api/market/sales/{sale_id}/exclusion`     | ✅     | Include or exclude by hand; outranks the system. |
@@ -911,6 +911,45 @@ not.
 hundred of nine hundred reads exactly like one that covered everything. One failing card is recorded
 and the run continues; a source with no `search` capability (`ebay` is searched by name at sync
 time and has no catalogue to link to) is refused outright.
+
+### Active listings
+
+`GET /api/cards/{id}/market/listings` returns what is on sale right now — the supply you would be
+competing with if you sold today. Fetched and stored since the eBay adapter shipped; the card page
+draws it now.
+
+**These are asking prices, not sales.** Anyone can ask anything, and an *unsold* listing is evidence
+that nobody paid it. Nothing here reaches a valuation: listings exist for the sold-to-active ratio
+in §17, and for the reader.
+
+```jsonc
+{
+  "grade_label": "raw", "grade": null, "price": 299.00, "currency": "GBP",
+  "shipping": 3.95,               // null means unstated, NOT free
+  "total_ask": 302.95,            // only where postage is known — never price + a guess
+  "is_auction": false,
+  "ends_at": null,                // auctions only
+  "seen_at": "2026-08-12T09:14:00Z",
+  "listing_title": "…", "source_url": "…", "platform": "ebay"
+}
+```
+
+Ordered **by grade, then by price**. A slabbed 10 and a raw copy are different markets, and one
+price ladder built from both is the pooled-grade error again — sorted by price alone they interleave,
+and averaging down the column describes neither.
+
+Three fields exist because the display would otherwise mislead:
+
+- `shipping` is `null` when the source did not state it, and the UI says "postage not stated" rather
+  than showing a total. A cheap card with expensive postage is not a cheap card.
+- `total_ask` is absent unless postage is known, so no total is ever a price with a guess inside it.
+- `seen_at` dates the evidence. Listings end and prices get cut; a fetch from three weeks ago
+  describes a shop window that has since changed, and the panel says so above the list.
+
+The card page also separates **auctions from fixed-price listings** when it summarises a grade. A
+live bid is not an asking price — it is an unfinished result that usually rises — so the "from £X"
+figure and the comparison against realised prices come from fixed-price listings only, with auctions
+counted beside them.
 
 ### Import
 

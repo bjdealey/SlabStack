@@ -539,6 +539,15 @@ def card_history(
     "/cards/{card_id}/market/listings",
     response_model=list[ListingOut],
     summary="Active listings for this card's identity",
+    description=(
+        "What is on sale right now, cheapest first — the supply you would be competing with if "
+        "you sold today.\n\n"
+        "**These are asking prices, not sales.** Anyone can ask anything, and an unsold listing "
+        "is evidence that nobody paid it. They are never mixed into a valuation.\n\n"
+        "Grouped by grade in the response order, because a slabbed 10 and a raw copy are "
+        "different markets and reading their asks as one list is how a raw card acquires a "
+        "graded price."
+    ),
 )
 def card_listings(db: DbSession, card: CardDep) -> list[ListingOut]:
     if not card.catalog_key:
@@ -549,7 +558,10 @@ def card_listings(db: DbSession, card: CardDep) -> list[ListingOut]:
             MarketListing.catalog_key == card.catalog_key,
             MarketListing.is_active.is_(True),
         )
-        .order_by(MarketListing.price_minor)
+        # Grade first so the caller cannot accidentally render one price ladder
+        # out of several different markets; cheapest first within each, since
+        # the cheapest is the one that sells before yours does.
+        .order_by(MarketListing.grade_label, MarketListing.price_minor)
     )
     return [ListingOut.from_model(row) for row in rows]
 
