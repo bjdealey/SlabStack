@@ -372,3 +372,59 @@ def test_sales_can_still_reach_the_top_band():
 
     assert result.basis == "sales"
     assert result.band == "very_liquid"
+
+
+# --- History for the chart ----------------------------------------------------
+
+
+def test_one_grade_gets_one_point_per_day_however_many_sources_wrote_one(client, db):
+    """Otherwise the chart spikes vertically on a day two sources disagreed.
+
+    `price_snapshots` is unique per (key, grade, date, source), so your own
+    valuation and a provider's index can both land on one afternoon. Plotted
+    ungrouped they draw a price movement that never happened.
+    """
+    from sqlalchemy import select
+
+    from app.models import Card, DataSource, PriceSnapshot
+
+    card = client.post("/api/cards", json={"name": "X", "card_number": "1/1"}).json()
+    key = db.get(Card, card["id"]).catalog_key
+    source = db.scalar(select(DataSource).where(DataSource.code == "pokemontcg_io"))
+    db.add(
+        PriceSnapshot(catalog_key=key, grade_label="raw", snapshot_date=TODAY,
+                      currency="GBP", value_minor=2000, sample_size=0, source_id=source.id)
+    )
+    db.add(
+        PriceSnapshot(catalog_key=key, grade_label="raw", snapshot_date=TODAY,
+                      currency="GBP", value_minor=1000, sample_size=9, source_id=None)
+    )
+    db.commit()
+
+    points = market_service.snapshots_for(db, key, since=TODAY - timedelta(days=30))
+    assert len(points) == 1
+    assert points[0].value_minor == 1000, "your own sales win, as they do for prices"
+
+
+def test_an_empty_own_snapshot_does_not_beat_a_real_provider_one(client, db):
+    """A zero-sample row of your own describes nothing."""
+    from sqlalchemy import select
+
+    from app.models import Card, DataSource, PriceSnapshot
+
+    card = client.post("/api/cards", json={"name": "Y", "card_number": "2/2"}).json()
+    key = db.get(Card, card["id"]).catalog_key
+    source = db.scalar(select(DataSource).where(DataSource.code == "pokemontcg_io"))
+    db.add(
+        PriceSnapshot(catalog_key=key, grade_label="raw", snapshot_date=TODAY,
+                      currency="GBP", value_minor=2000, sample_size=0, source_id=source.id)
+    )
+    db.add(
+        PriceSnapshot(catalog_key=key, grade_label="raw", snapshot_date=TODAY,
+                      currency="GBP", value_minor=1, sample_size=0, source_id=None)
+    )
+    db.commit()
+
+    points = market_service.snapshots_for(db, key, since=TODAY - timedelta(days=30))
+    assert len(points) == 1
+    assert points[0].value_minor == 2000
