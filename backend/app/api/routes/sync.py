@@ -26,7 +26,7 @@ from app.api.deps import DbSession
 from app.api.errors import ApiError, ConflictError, NotFoundError
 from app.models import Card, DataSource
 from app.schemas.common import ApiModel
-from app.services import cards_service, market_sync
+from app.services import cards_service, catalog_link, market_sync
 from app.services.market_data.base import CardQuery
 from app.services.market_data.http import ProviderRequestError
 from app.services.market_data.registry import (
@@ -290,6 +290,89 @@ def link_card(db: DbSession, card_id: str, payload: LinkPayload) -> dict:
         "applied_fields": applied,
         "catalog_key": card.catalog_key,
     }
+
+
+# --- Linking the whole collection --------------------------------------------
+
+
+class LinkCandidateOut(ApiModel):
+    external_id: str
+    name: str
+    set_name: str | None = None
+    card_number: str | None = None
+    confidence: float = 0.0
+
+
+class LinkOutcomeOut(ApiModel):
+    card_id: str
+    name: str
+    status: str = Field(
+        description="`linked`, `ambiguous` (candidates found, none clearly right), `skipped` "
+        "(nothing to search with, or no match at all) or `failed`."
+    )
+    reason: str | None = None
+    external_id: str | None = None
+    matched_name: str | None = None
+    confidence: float | None = None
+    candidates: list[LinkCandidateOut] = Field(
+        default_factory=list,
+        description="What it was choosing between when it declined to choose.",
+    )
+
+
+class LinkReportOut(ApiModel):
+    source_code: str
+    source_name: str
+    linked: int = 0
+    skipped: int = 0
+    ambiguous: int = 0
+    failed: int = 0
+    dry_run: bool = True
+    status: str
+    reason: str | None = None
+    cards: list[LinkOutcomeOut] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+@router.post(
+    "/catalog/link-all",
+    response_model=LinkReportOut,
+    summary="Link every card this source can identify beyond doubt",
+    description=(
+        "Searches the source once per unlinked card and stores the provider's id where the "
+        "match is unambiguous. Anything less than certain is returned with its candidates "
+        "rather than guessed at — a wrong link prices a different printing on every future "
+        "refresh, stays plausible, and never announces itself.\n\n"
+        "**Dry run by default.** A bulk action nobody watches card by card should be able to "
+        "show its work before it does any.\n\n"
+        "**Only the link is written.** Set name, number and rarity feed `catalog_key`, which is "
+        "how sales and prices find a card at all, so accepting those in bulk could re-key a card "
+        "away from its own history. The per-card dialog offers that; this does not."
+    ),
+)
+def link_all(
+    db: DbSession,
+    source_code: Annotated[str, Query(description="Which source to link against.")] = "pokemontcg_io",
+    dry_run: Annotated[bool, Query(description="Report what would happen and change nothing.")] = True,
+    relink: Annotated[bool, Query(description="Include cards already linked to this source.")] = False,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> LinkReportOut:
+    source = _source(db, source_code)
+    report = catalog_link.link_collection(
+        db, source, dry_run=dry_run, limit=limit, relink=relink
+    )
+    if not dry_run:
+        db.commit()
+    return LinkReportOut(
+        **{key: value for key, value in vars(report).items() if key != "cards"},
+        cards=[
+            LinkOutcomeOut(
+                **{key: value for key, value in vars(row).items() if key != "candidates"},
+                candidates=[LinkCandidateOut(**item) for item in row.candidates],
+            )
+            for row in report.cards
+        ],
+    )
 
 
 # --- Refreshing --------------------------------------------------------------

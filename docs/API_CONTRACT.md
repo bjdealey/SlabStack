@@ -736,6 +736,7 @@ insure the slab for — and clearing it restores the engine's suggestion.
 | PATCH  | `/api/data-sources/{code}`                  | ✅     | Enable or configure a source.                  |
 | GET    | `/api/catalog/lookup`                       | ✅     | Find a card in a provider's catalogue.         |
 | POST   | `/api/cards/{id}/catalog-link`              | ✅     | Confirm a catalogue match for a card.          |
+| POST   | `/api/catalog/link-all`                     | ✅     | Link every unlinked card. Dry run by default.  |
 
 `/api/data-sources` reports `credentials` — one `{env_var, present}` per environment variable the
 source reads — and never returns a value. Some sources need more than one (eBay wants a client id
@@ -862,6 +863,54 @@ lookup fills gaps rather than overwriting decisions. The provider's own id is st
 drifting onto a different printing.
 
 `confidence` is for ordering candidates and nothing else.
+
+### Linking the whole collection
+
+`POST /api/catalog/link-all?source_code=…&dry_run=true&relink=false&limit=100` searches the source
+once per unlinked card and stores the provider's id where the match is unambiguous. It exists
+because per-card linking is the most tedious thing in this application — a hundred cards and two
+sources is two hundred searches, each ending in a click on the obvious answer.
+
+The tedium is not the risk, though. A wrong link is silent and lasting: every future refresh prices
+a different printing, the figures stay plausible, and nothing ever says so. So this is not "link
+everything" — it is **link the ones where there is nothing to decide, and hand the rest back**.
+Three things are required, and all three:
+
+1. **The card carries enough to search with.** A name alone matches a dozen Pikachus, so a card with
+   no number and no set is never linked automatically however confident a provider sounds.
+2. **The best candidate clears a confidence floor** (`0.7` — the name matched exactly *and* at least
+   one thing pinned it down).
+3. **The best is clearly ahead of the runner-up** (`0.2`). Two candidates at 0.85 are a choice, and
+   a choice belongs to the user.
+
+```jsonc
+{
+  "source_code": "pokemontcg_io", "source_name": "Pokémon TCG API",
+  "linked": 1, "ambiguous": 1, "skipped": 2, "failed": 0,
+  "dry_run": true, "status": "ok",
+  "cards": [{
+    "card_id": "…", "name": "Charizard 4/102", "status": "ambiguous",
+    "reason": "Two candidates are close (80% and 80%). That is a choice, and a wrong one prices a
+               different printing from here on.",
+    "candidates": [ { "external_id": "base1-4", "name": "Charizard",
+                      "set_name": "Base", "confidence": 0.8 }, … ]
+  }],
+  "notes": [ … ]                      // e.g. the run was capped, or N need a decision
+}
+```
+
+**Dry run by default**, and the dry run is a real pass against the source that happens to write
+nothing — so what you approve is what was actually found rather than an estimate of it.
+
+**Only the link is written**, even when the match is certain. Set name, number and rarity feed
+`catalog_key`, which is how sales and prices find a card at all, so accepting those in bulk could
+re-key a card away from its own history. The per-card dialog offers that; this deliberately does
+not.
+
+`limit` caps one pass and **the cap is always reported** — a run that quietly covered the first
+hundred of nine hundred reads exactly like one that covered everything. One failing card is recorded
+and the run continues; a source with no `search` capability (`ebay` is searched by name at sync
+time and has no catalogue to link to) is refused outright.
 
 ### Import
 

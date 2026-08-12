@@ -519,16 +519,50 @@ discovered by hovering the one point that explains it.
 
 ---
 
+## Bulk catalogue linking ✅
+
+A source prices a card only once it has been told which card it is, and that link is stored per card
+per source. Done one dialog at a time it was the most tedious thing in the build: a hundred cards
+and two sources is two hundred searches, each ending in a click on the obvious answer. It was also
+the largest practical barrier to the network adapters being worth having at all — an unlinked card
+is priced by nothing.
+
+`app/services/catalog_link.py` does the pass, `POST /api/catalog/link-all` exposes it, `BulkLink.tsx`
+drives it. What shaped all three is that **the tedium was never the risk**. A wrong link is silent
+and lasting — every future refresh prices a different printing, the figures stay plausible, and
+nothing ever says so. So it is not "link everything"; it is *link the ones where there is nothing to
+decide, and hand the rest back*.
+
+- **Three tests of unambiguity, all required.** The card carries more than a name; the best
+  candidate clears a confidence floor; the best is clearly ahead of the runner-up. Two candidates at
+  0.85 are a choice, and a choice belongs to the user.
+- **A name alone is never enough**, however confident a provider sounds about it. Twelve cards are
+  called Pikachu and a search will rank one of them first regardless.
+- **Dry run by default**, and the dry run is a real pass against the source that happens to write
+  nothing — so what is approved is what was actually found, not an estimate of it.
+- **Only the link is written.** Set name, number and rarity feed `catalog_key`, so accepting a
+  catalogue's identity in bulk could re-key a card away from the sales and prices already attached to
+  it. The per-card dialog offers that; this does not.
+- **Refusals arrive with their candidates**, so "why was this one skipped" is on screen rather than
+  in a log — and the near-misses are the actual work left to do, which is why the panel lists only
+  those and not the successes.
+- **No silent cap.** A run that quietly covered the first hundred of nine hundred reads exactly like
+  one that covered everything, so the cap is always stated.
+
+Most of the test file is about the declining rather than the linking. The one that matters more than
+the rest is that a dry run writes nothing.
+
+---
+
 ## What is left
 
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,
 not an engine — and it will always be a suggestion the user confirms, never applied silently.
 
-*(PriceCharting is built — see below.)*
-
-The per-card price/volume/liquidity chart is also outstanding — `price_snapshots`,
-`GET /api/cards/{id}/market/history` and `SnapshotSeries` all exist and are exercised; only the
-chart component is missing.
+Active listings are fetched and stored but barely surfaced: `GET /api/cards/{id}/market/listings`
+returns them and the sold-to-active ratio feeds liquidity, yet nothing lists them for a card. A
+PriceCharting CSV import (their Legendary tier ships the whole price guide as a file) would beat
+searching card by card for a real collection, and is the obvious next thing after this.
 
 ---
 
