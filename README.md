@@ -125,7 +125,30 @@ fix. Worth running before assuming something is broken.
 **What this source fills, and what it does not.** It gives the card catalogue and an aggregate price
 for the *raw* card. It carries no individual sales and no graded prices, so liquidity stays unknown,
 a trend accrues only forward from the day you start, and **the grade-or-sell decision still needs
-graded comparables** you enter or import. It fills the raw value, not the decision.
+graded comparables**. It fills the raw value, not the decision.
+
+### Connecting eBay, which fills the decision
+
+Grading is a comparison between what a card fetches raw and what it fetches in a slab, and the
+catalogue above only carries the first number. eBay carries both, because slabs sell there with the
+grade in the title — so one search brings back raw sales *and* PSA 10 sales *and* CGC 9.5 sales, and
+the comparison becomes real rather than typed in. It is also the only source here that can measure
+liquidity, which needs actual trades.
+
+1. Create an application at [developer.ebay.com](https://developer.ebay.com). Export the **App ID**
+   as `SLABSTACK_EBAY_APP_ID` and the **Cert ID** as `SLABSTACK_EBAY_CERT_ID`, then restart.
+2. Apply for **Marketplace Insights** — the sold-listings API, which eBay grants per application.
+3. **Settings → Data sources → eBay → Enable**, then **Refresh prices**.
+
+Nothing needs linking: eBay is searched by name, so every card in your collection is eligible
+immediately. If you are not on the UK marketplace, change `marketplace` in the source's config
+(`EBAY_US`, `EBAY_DE`, …) and set the matching exchange rate.
+
+**What it does not do.** Without Marketplace Insights approval, sold queries return 403 — the sync
+says so and still records active listings, so liquidity keeps its denominator. Sold data covers the
+last **90 days**, so a longer trend still accrues forward from snapshots. Asking prices are recorded
+as listings and never as sales. And the grade is read out of the seller's own listing title, so
+check a card's exclusions before trusting a thin sample.
 
 **The GitHub Pages demo cannot do any of this.** Pages serves static files, so there is no server to
 make a request from and nothing that persists a page refresh. The demo is for clicking through the
@@ -231,6 +254,23 @@ lives in the database and is editable in **Settings**, not in code.
 
 Market-data API keys are read from named environment variables at call time. The database stores
 the *name* of the variable, never a key.
+
+### Market data sources
+
+| Source | Needs | Gives |
+| --- | --- | --- |
+| **Pokémon TCG API** | Nothing. Ships **on**. An optional `SLABSTACK_POKEMONTCG_API_KEY` raises the rate limit | Card identity for search-first entry, plus one aggregate price for the **raw** card |
+| **eBay** | `SLABSTACK_EBAY_APP_ID` and `SLABSTACK_EBAY_CERT_ID` from a developer.ebay.com application. Ships **off** | Individual **sold** listings — including slabs, so it fills the **graded** prices the grading decision needs — plus active listings for liquidity |
+
+eBay is the one that makes the core question answerable, because grading is a comparison between
+what a card fetches raw and what it fetches in a slab, and only a source with real sales carries
+the second number. Two caveats worth knowing before you set it up: sold data sits behind
+**Marketplace Insights**, which eBay approves per application (without it the source still records
+active listings), and it covers the last **90 days**.
+
+Run `make doctor` after setting either up. It walks the chain — credentials, eligible cards,
+exchange rate, one real request, what has actually landed — and stops at the first thing blocking a
+sync with the fix for it.
 
 ---
 

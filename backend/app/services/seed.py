@@ -300,6 +300,43 @@ SELLING_PROFILES: tuple[dict, ...] = (
 
 # --- Market data sources (all network providers start disabled) --------------
 
+def _adopt_source(existing: DataSource, spec: dict) -> None:
+    """Let an already-created source pick up work done since it was created.
+
+    A row written before its adapter existed is inert forever otherwise: it has
+    no ``provider_class``, so it cannot be enabled, so the feature simply never
+    arrives for anyone who ran an earlier version. Upgrading a build has to
+    upgrade the reference data with it.
+
+    What it will not touch is ``enabled``, except in the one direction covered
+    below. Turning a network source on because a new version shipped one would
+    be making an outbound-traffic decision on the user's behalf.
+    """
+    if spec.get("provider_class") and not existing.provider_class:
+        existing.provider_class = spec["provider_class"]
+        # Config travels with the adapter: it is the adapter's settings, and a
+        # marketplace or a window that the old row never had is not optional.
+        existing.config = {**(spec.get("config") or {}), **(existing.config or {})}
+        existing.rate_limit_per_minute = (
+            existing.rate_limit_per_minute or spec.get("rate_limit_per_minute")
+        )
+        # The notes say what a source can and cannot do, and the old ones said
+        # "no adapter written yet", which is now false.
+        existing.notes = spec.get("notes") or existing.notes
+        existing.terms_url = spec.get("terms_url") or existing.terms_url
+
+    # The one enable that is safe: a source that ships on by default, in a
+    # database that predates that default, which the user has never run and so
+    # has never deliberately turned off.
+    if (
+        spec.get("enabled")
+        and not existing.enabled
+        and existing.last_sync_at is None
+        and existing.last_sync_status is None
+    ):
+        existing.enabled = True
+
+
 DATA_SOURCES: tuple[dict, ...] = (
     {
         "code": "manual",
@@ -346,15 +383,36 @@ DATA_SOURCES: tuple[dict, ...] = (
         "code": "ebay",
         "name": "eBay",
         "kind": DataSourceKind.MARKET_DATA.value,
+        "provider_class": "app.services.market_data.ebay.EbayProvider",
         "base_url": "https://api.ebay.com",
         "api_key_env_var": "SLABSTACK_EBAY_APP_ID",
+        # Off by default, unlike the catalogue source. That one can work with no
+        # setup at all; this one cannot do anything without two credentials, and
+        # a source switched on that immediately fails to authenticate is worse
+        # than one the user turns on when they are ready.
         "enabled": False,
         "priority": 50,
+        "rate_limit_per_minute": 30,
+        "config": {
+            # Decides the currency eBay quotes, so it decides whether an
+            # exchange rate is needed at all. GB by default because the app
+            # ships with GBP as its currency; change both together.
+            "marketplace": "EBAY_GB",
+            # The *name* of the variable holding the client secret. Never the
+            # secret. eBay calls the pair App ID and Cert ID.
+            "api_secret_env_var": "SLABSTACK_EBAY_CERT_ID",
+            # eBay's own limit on sold data, stated rather than discovered.
+            "sold_window_days": 90,
+        },
         "terms_url": "https://developer.ebay.com/api-docs/static/ebay-rest-landing.html",
         "notes": (
-            "Real sold listings — the best fit for these engines, since liquidity and trend "
-            "need individual sales. Needs a developer app, and Marketplace Insights needs "
-            "separate approval. Official API only, under its terms: never scraped."
+            "Individual sold listings — the only source here that can fill the graded side of "
+            "the grading decision, because slabs sell on eBay with the grade in the title. "
+            "Also the only one that can measure liquidity, which needs real trades. "
+            "Needs a developer application for SLABSTACK_EBAY_APP_ID and "
+            "SLABSTACK_EBAY_CERT_ID; sold data additionally needs Marketplace Insights "
+            "approval, without which active listings still work. Official API under its "
+            "terms, never scraped."
         ),
     },
     {
@@ -676,18 +734,7 @@ def seed_all(db: Session, *, force: bool = False) -> dict[str, int]:
     for source in DATA_SOURCES:
         existing = _get_by(db, DataSource, code=source["code"])
         if existing is not None:
-            # A database created before a source gained its adapter still has
-            # the old `enabled: False`. Adopt the new default — but only where
-            # the source has never run, so a deliberate disable is never undone.
-            if (
-                source.get("enabled")
-                and not existing.enabled
-                and existing.last_sync_at is None
-                and existing.last_sync_status is None
-            ):
-                existing.enabled = True
-                existing.provider_class = source.get("provider_class")
-                existing.config = source.get("config")
+            _adopt_source(existing, source)
             continue
         db.add(DataSource(**source))
         counts["data_sources"] += 1

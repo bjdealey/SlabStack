@@ -349,6 +349,13 @@ class GradeRuleWrite(ApiModel):
         return self
 
 
+class CredentialOut(ApiModel):
+    """One environment variable a source needs, and whether it is set."""
+
+    env_var: str
+    present: bool
+
+
 class DataSourceOut(ApiModel):
     id: str
     code: str
@@ -360,6 +367,10 @@ class DataSourceOut(ApiModel):
     priority: int
     has_adapter: bool
     api_key_present: bool
+    #: Every environment variable the source reads, and whether it is set. Some
+    #: need more than one — reporting only the first shows a source as ready
+    #: when it cannot authenticate. Names only, never values.
+    credentials: list[CredentialOut] = Field(default_factory=list)
     last_sync_at: str | None = None
     last_sync_status: str | None
     terms_url: str | None

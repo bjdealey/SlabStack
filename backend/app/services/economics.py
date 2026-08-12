@@ -75,6 +75,49 @@ class DeclaredValue:
     coverage: float | None = None
 
 
+_FLOOR = (
+    " A slab is worth at least the card inside it, so this is a floor rather than an estimate."
+)
+
+
+def _why_not_weighted(
+    by_label: dict, probabilities: dict[float, float] | None, company_code: str | None
+) -> str:
+    """Say which thing is actually missing, because they need opposite actions.
+
+    Falling back to the raw value has three quite different causes and they used
+    to share one sentence — "no graded sales are stored for this card" — which
+    was a claim about the data and was often simply untrue. A user reading it
+    with a screen full of PSA 10 comparables in front of them would go and
+    import graded sales they already had, and nothing would change.
+    """
+    graded = sorted(label for label in by_label if label != "raw")
+
+    if not graded:
+        return (
+            "The raw market value — no graded sales are stored for this card, so there is "
+            "nothing to estimate the slab's value from." + _FLOOR
+        )
+
+    stored = ", ".join(graded)
+    if not probabilities:
+        return (
+            f"The raw market value. Graded sales are stored ({stored}), but weighting them "
+            "needs to know how likely each grade is, and this card has not been assessed yet. "
+            "Assess its condition and this becomes a probability-weighted figure." + _FLOOR
+        )
+    if not company_code:
+        return (
+            f"The raw market value. Graded sales are stored ({stored}), but no grading company "
+            "is selected to value against." + _FLOOR
+        )
+    return (
+        f"The raw market value. The stored graded sales ({stored}) are not on {company_code}'s "
+        f"ladder, so none of them price a grade this card might come back as from {company_code}."
+        + _FLOOR
+    )
+
+
 def suggest_declared_value(
     card: Card,
     *,
@@ -138,11 +181,7 @@ def suggest_declared_value(
         return DeclaredValue(
             value_minor=raw_minor,
             confidence=Confidence.LOW.value,
-            basis=(
-                "The raw market value — no graded sales are stored for this card, so there is "
-                "nothing to estimate the slab's value from. A slab is worth at least the card "
-                "inside it, so this is a floor rather than an estimate."
-            ),
+            basis=_why_not_weighted(by_label, probabilities, company_code),
         )
 
     fallback = card.user_raw_value_minor or card.purchase_price_minor

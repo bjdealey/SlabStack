@@ -15,6 +15,7 @@ this abstraction was shaped to avoid (spec section 5).
 
 from __future__ import annotations
 
+import os
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, status
@@ -28,7 +29,11 @@ from app.schemas.common import ApiModel
 from app.services import cards_service, market_sync
 from app.services.market_data.base import CardQuery
 from app.services.market_data.http import ProviderRequestError
-from app.services.market_data.registry import ProviderUnavailableError, load_provider
+from app.services.market_data.registry import (
+    ProviderUnavailableError,
+    credentials_present,
+    load_provider,
+)
 
 router = APIRouter(tags=["market data"])
 
@@ -42,6 +47,17 @@ class DataSourceUpdate(ApiModel):
     config: dict[str, Any] | None = None
 
 
+class CredentialOut(ApiModel):
+    """One environment variable a source needs, and whether it is set.
+
+    The *name* only, never the value — that rule is the whole reason
+    credentials are held in the environment rather than the database.
+    """
+
+    env_var: str
+    present: bool
+
+
 class SourceStateOut(ApiModel):
     code: str
     name: str
@@ -49,6 +65,10 @@ class SourceStateOut(ApiModel):
     has_adapter: bool
     api_key_present: bool
     api_key_env_var: str | None = None
+    #: Some sources need more than one. eBay wants a client id *and* a secret,
+    #: and reporting only the first would show a green tick beside a source that
+    #: cannot authenticate.
+    credentials: list[CredentialOut] = Field(default_factory=list)
     last_sync_at: str | None = None
     last_sync_status: str | None = None
     last_sync_error: str | None = None
@@ -56,9 +76,14 @@ class SourceStateOut(ApiModel):
     notes: str | None = None
 
 
-def _state(source: DataSource) -> SourceStateOut:
-    import os
+def _credentials(source: DataSource) -> list[CredentialOut]:
+    return [
+        CredentialOut(env_var=name, present=present)
+        for name, present in credentials_present(source).items()
+    ]
 
+
+def _state(source: DataSource) -> SourceStateOut:
     return SourceStateOut(
         code=source.code,
         name=source.name,
@@ -66,6 +91,7 @@ def _state(source: DataSource) -> SourceStateOut:
         has_adapter=bool(source.provider_class),
         api_key_present=bool(source.api_key_env_var and os.environ.get(source.api_key_env_var)),
         api_key_env_var=source.api_key_env_var,
+        credentials=_credentials(source),
         last_sync_at=source.last_sync_at.isoformat() if source.last_sync_at else None,
         last_sync_status=source.last_sync_status,
         last_sync_error=source.last_sync_error,
@@ -284,6 +310,27 @@ class CardSyncOut(ApiModel):
     )
     reason: str | None = None
 
+    sales_imported: int = Field(default=0, description="New sales written for this card.")
+    sales_updated: int = Field(
+        default=0, description="Sales already held that this run refreshed rather than duplicated."
+    )
+    sales_excluded: int = Field(
+        default=0,
+        description="Fetched and deliberately not counted — lots, wrong language, wrong "
+        "printing, wrong grade. Kept in the table so any exclusion can be inspected and reversed.",
+    )
+    grades: list[str] = Field(
+        default_factory=list,
+        description="Grade labels this card now has sales for, raw first. The graded ones are "
+        "what the raw price gets compared against.",
+    )
+    listings_seen: int = Field(default=0, description="Active listings recorded, this page.")
+    listings_reported: int | None = Field(
+        default=None,
+        description="How many the source says exist. Larger than `listings_seen` when the "
+        "result was paged — this is the honest denominator for the sold-to-active ratio.",
+    )
+
 
 class SyncReportOut(ApiModel):
     source_code: str
@@ -298,6 +345,9 @@ class SyncReportOut(ApiModel):
     reason: str | None = None
     cards: list[CardSyncOut] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    sales_imported: int = 0
+    sales_excluded: int = 0
+    listings_seen: int = 0
 
 
 @router.post(

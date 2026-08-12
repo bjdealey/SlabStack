@@ -350,16 +350,75 @@ user's machine.**
 
 ---
 
+## Sales-level market data ✅
+
+eBay, in `app/services/market_data/ebay.py`. The first source that supplies **evidence** rather
+than somebody's index, which changes what three engines can answer.
+
+Everything before this handed over one number. This hands over individual sold listings, and
+because slabs sell on eBay with the grade in the title, **one query returns raw sales and PSA 10
+sales and CGC 9.5 sales together**. That is the comparison the whole application exists to make,
+and until now the graded half of it had to be typed in by hand.
+
+- **Nothing writes a valuation.** Sales go into `market_sales`, listings into `market_listings`,
+  and then the Phase 3 pricing engine recomputes from them. So a fetched sale and a typed one go
+  through the same exclusion rules, the same outlier fence and the same arithmetic, and the price
+  arrives carrying a sample size instead of standing on a third party's authority.
+- **Liquidity becomes measurable** — it needs real trades and a sold-to-active ratio, and no
+  aggregate price can supply either.
+- **No link needed.** A catalogue has to be told its own id for a card; a marketplace is searched
+  by name. `requires_external_id` carries that difference, because a marketplace adapter that
+  demanded a link would sync nothing, forever, and look exactly like a working sync.
+- **Application credentials, not a user's.** Client-credentials OAuth, cached until just before it
+  expires. Nothing here can list, bid or buy. Both variable *names* live in config; neither value
+  ever touches the database.
+- **Active listings are marked inactive, never deleted**, when they stop coming back — otherwise
+  the active count only grows and the liquidity denominator rots.
+- **The honest denominator.** eBay reports how many listings exist; one page is not the size of
+  the market, and counting the page would understate supply — which flatters liquidity, which
+  flatters the decision to grade.
+
+**What it cannot do.** Marketplace Insights is granted per application, so sold data 403s until
+eBay approves it — reported as `CapabilityDeniedError`, which is deliberately *not* a failure: the
+run notes it and carries on with active listings. Sold data covers 90 days, so a longer trend
+still accrues forward from snapshots. And asking prices are never written as sales.
+
+**Learned the hard way, twice, and both by driving the UI.**
+
+*"PSA 10 READY" is a raw card.* Marketplace titles are full of grades the seller hopes for —
+"would grade a 9 easy", "gem mint candidate" — and every one names a company and a number, so the
+existing title parser read them as completed graded sales. In the fixtures that put a £230 raw
+card beside a real £420 PSA 10 and pulled the graded price down by nearly half, silently, turning a
+card worth grading into one that is not. `parse_grade_from_title` now refuses them and they fall
+through to `raw`, which is what they are. The narrowness matters in both directions: "Gem Mint" is
+PSA's own name for a 10 and appears in genuine slab titles constantly, so it is deliberately *not*
+an aspiration word.
+
+*The declared value denied the sales it had just imported.* With PSA 10 and CGC 9.5 comparables on
+screen — and the line "PSA 10 sells +95% against raw" four rows above it — the declared value still
+read "no graded sales are stored for this card". The number was right, because an unassessed card
+has no grade distribution to weight with. The *reason* was a false claim about the data, and it
+would have sent you off to import comparables you already had. Falling back to the raw value has
+three quite different causes and they now say which one applies.
+
+**Verified as far as this environment allows.** The sandbox cannot reach eBay, so the adapter runs
+against recorded fixtures. For the UI pass those fixtures were served from a local stub with the
+adapter's `base_url` pointed at it, so the real adapter, the real sync engine, the real exclusion
+rules and the real React screen all ran over real HTTP — which is how both bugs above were found.
+That proves the documented shape parses and the chain works end to end; it cannot prove eBay still
+returns that shape. **The first live request is the verification, and it happens on your machine.**
+
+---
+
 ## What is left
 
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,
 not an engine — and it will always be a suggestion the user confirms, never applied silently.
 
-A **sales-level** source is the biggest remaining gain. eBay's Marketplace Insights or
-PriceCharting's sold data would fill `market_sales` rather than an aggregate price row, which is
-what liquidity, trend and — via graded comparables — the grading decision actually need. The
-adapter interface and the sync engine already take them; each needs credentials and its terms
-reviewed.
+**PriceCharting** would still be worth having, for the one thing eBay cannot do: it returns
+PSA 10 / PSA 9 / BGS / CGC prices as named fields, with no title parsing and no 90-day limit. Where
+eBay gives better evidence, that gives better *coverage* — cards that trade too rarely to produce
+sold listings in a 90-day window. It needs a paid key.
 
 The per-card price/volume/liquidity chart is also outstanding — `price_snapshots`,
 `GET /api/cards/{id}/market/history` and `SnapshotSeries` all exist and are exercised; only the

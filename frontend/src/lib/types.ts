@@ -310,10 +310,22 @@ export interface DataSource {
   priority: number
   has_adapter: boolean
   api_key_present: boolean
+  /**
+   * Every environment variable the source reads, and whether it is set. Some
+   * need more than one — eBay wants a client id and a secret — and reporting
+   * only the first shows a source as ready when it cannot authenticate.
+   * Names only. Never values.
+   */
+  credentials: Credential[]
   last_sync_at: string | null
   last_sync_status: string | null
   terms_url: string | null
   notes: string | null
+}
+
+export interface Credential {
+  env_var: string
+  present: boolean
 }
 
 /* --- Settings ------------------------------------------------------------ */
@@ -1316,6 +1328,17 @@ export interface CardSyncOutcome {
   /** Your rate from Settings, not a live one. */
   fx_rate: number | null
   reason: string | null
+
+  /* A sales-level source answers with evidence rather than one number. */
+  sales_imported: number
+  sales_updated: number
+  /** Fetched and deliberately not counted. Kept, so any exclusion is reversible. */
+  sales_excluded: number
+  /** Grade labels this card now has sales for, raw first. */
+  grades: string[]
+  listings_seen: number
+  /** What the source says exists. Larger than `listings_seen` when paged. */
+  listings_reported: number | null
 }
 
 export interface SyncReport {
@@ -1331,4 +1354,7 @@ export interface SyncReport {
   reason: string | null
   cards: CardSyncOutcome[]
   notes: string[]
+  sales_imported: number
+  sales_excluded: number
+  listings_seen: number
 }

@@ -737,33 +737,48 @@ insure the slab for — and clearing it restores the engine's suggestion.
 | GET    | `/api/catalog/lookup`                       | ✅     | Find a card in a provider's catalogue.         |
 | POST   | `/api/cards/{id}/catalog-link`              | ✅     | Confirm a catalogue match for a card.          |
 
-`/api/data-sources` reports `api_key_present` as a boolean and never returns a key value. Keys are
-read from named environment variables; the database stores only the variable's name.
+`/api/data-sources` reports `credentials` — one `{env_var, present}` per environment variable the
+source reads — and never returns a value. Some sources need more than one (eBay wants a client id
+*and* a secret), and reporting only the first would show a green tick beside a source that cannot
+authenticate. `api_key_present` remains for the primary key. The database stores variable *names*.
 
-Every network provider ships **disabled**. Enabling one is the moment this application first talks
-to the internet, so it is a decision the user takes rather than a default they discover, and
-`/api/market/refresh` returns `409` until they do. `manual` and `csv` are enabled, because they work
-with no network, no key and no terms of service — and they are what everything degrades to.
+**One source ships enabled**: `pokemontcg_io`, the only one that works with no account, no key and
+no approval — a switch the user has to find before anything works is a worse default than an
+outbound request they can turn off in one click. Everything else ships **disabled**, and
+`/api/market/refresh` returns `409` until a network source is on. `manual` and `csv` are always
+enabled, because they work with no network, no key and no terms of service — and they are what
+everything degrades to.
 
 ### Live providers
 
-Only `pokemontcg_io` has an adapter. It was chosen because it is the only source a user can try with
-no signup, no approval and no payment: it answers anonymously, and a key only raises the ceiling.
-The rest are listed to show what is planned and **cannot be enabled** — `PATCH` returns `409`,
-because a switch with nothing behind it is worse than no switch.
+Two have adapters, and they are different *kinds* of source. The rest are listed to show what is
+planned and **cannot be enabled** — `PATCH` returns `409`, because a switch with nothing behind it
+is worse than no switch.
 
-**What that source cannot do matters more than what it can**, and the API is shaped so this cannot
-be missed:
-
-| Engine | With this source | Why |
+| | `pokemontcg_io` — a catalogue | `ebay` — a marketplace |
 | --- | --- | --- |
-| Valuation | An aggregate index, used only where you have no sales | It is TCGplayer's or Cardmarket's number, not a median of sales you could have made |
-| Liquidity | **Unknown** | Measured from how often a card trades; one price cannot say |
-| Trend | Accrues **forward only** | No history to import, so it is built from daily snapshots |
-| Grading decision | **Still unanswerable** | No graded prices at all — the decision is raw-versus-slab |
+| Supplies | One aggregate price | Individual sold listings and active listings |
+| Setup | Nothing. Optional key raises the limit | Developer application; two credentials |
+| Identifies a card by | Its own id, stored once you confirm a match | Name — `requires_external_id: false`, nothing to link |
+| Valuation | Someone's index, used only where you have no sales | A median of real sales, computed by the same engine as your own |
+| Liquidity | **Unknown** — one price cannot say how often a card trades | **Measured**, from sold frequency and the sold-to-active ratio |
+| Trend | Forward only, from daily snapshots | 90 days of history, then forward |
+| Grading decision | **Unanswerable** — no graded prices at all | **Answerable** — slabs sell with the grade in the title |
 
-A graded `MarketKey` returns `None` rather than the raw price. Answering it would put the same
-number on both sides of the grading decision and make grading look exactly break-even, every time.
+A graded `MarketKey` returns `None` from the catalogue rather than the raw price. Answering it would
+put the same number on both sides of the grading decision and make grading look exactly break-even,
+every time.
+
+**What eBay cannot do.** Sold data lives behind Marketplace Insights, which eBay grants per
+application; until it is approved every sold query returns `403`. That is reported as a *note* and
+not a failure — the run continues and still records active listings — because "you are not approved
+for this" and "this card has not sold" need completely different things from the user. Sold data
+covers 90 days. And asking prices are recorded as listings, never as sales.
+
+**The grade comes from the seller's own listing title**, since eBay has no grade field. Titles that
+name a grade the seller only *hopes* for — "PSA 10 READY", "would grade a 9" — are read as `raw`,
+which is what they are. Counting them as graded sales would drag the graded price towards the raw
+price and quietly invert the decision.
 
 ### Precedence
 
@@ -805,8 +820,35 @@ like money. Every converted figure reports the rate it used.
 }
 ```
 
+A **sales-level** source fills different fields on the same report, because it did a different
+kind of work — one number per card would say nothing about a run that imported fourteen sales
+across three grades:
+
+```jsonc
+{
+  "source_code": "ebay", "source_name": "eBay",
+  "requested": 1, "updated": 1, "skipped": 0, "failed": 0, "status": "ok",
+  "sales_imported": 7, "sales_excluded": 3, "listings_seen": 3,
+  "cards": [{
+    "card_id": "…", "name": "Umbreon VMAX 215/203", "status": "updated",
+    "sales_imported": 7, "sales_updated": 0,
+    "sales_excluded": 3,              // job lots, wrong language, wrong printing — kept, reversible
+    "grades": ["raw", "CGC 9.5", "PSA 10"],   // the graded ones are the point
+    "listings_seen": 3,
+    "listings_reported": 61,          // what eBay says exists; one page is not the market
+    "value": null, "reason": null     // no aggregate price: the engine computes it from the sales
+  }],
+  "notes": [ … ]                      // e.g. Marketplace Insights not granted
+}
+```
+
+`listings_reported` is the honest denominator for the sold-to-active ratio. Counting only the page
+fetched would understate supply, and understated supply flatters liquidity — which flatters the
+decision to grade.
+
 **A failure costs future updates, never history.** Nothing is cleared before a run, so a sync that
-breaks halfway leaves everything it had already written.
+breaks halfway leaves everything it had already written. Active listings that stop appearing are
+marked inactive rather than deleted, and only after a *successful* fetch.
 
 ### Catalogue lookup
 

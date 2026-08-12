@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pytest
+
 from app.enums import SaleExclusionReason
 from app.models import Card, MarketSale
 from app.services import market_service, sales_import
@@ -61,6 +63,67 @@ def test_grades_are_read_out_of_listing_titles():
     assert sales_import.parse_grade_from_title("Charizard CGC 9.5") == ("CGC", 9.5)
     assert sales_import.parse_grade_from_title("Blastoise BECKETT 8") == ("BGS", 8.0)
     assert sales_import.parse_grade_from_title("Pikachu NM raw") is None
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Umbreon VMAX 215/203 PSA 10 READY Gem Mint centering",
+        "Charizard Base Set - ready for PSA grading",
+        "Pikachu Promo WOULD GRADE PSA 9 EASY",
+        "Raw Umbreon VMAX 215/203 - PSA 10 candidate",
+        "Moonbreon PSA 10 potential, mint condition",
+        "Charizard ungraded, PSA 10 worthy",
+        "Umbreon VMAX PSA 10 QUALITY perfect centering",
+        "PSA 10 material Umbreon VMAX",
+        "Blastoise gradeable condition",
+        "Venusaur not graded, near mint",
+        "Charizard - send it off for grading!",
+    ],
+)
+def test_a_hoped_for_grade_is_not_a_grade(title: str):
+    """The most damaging misread available to this module.
+
+    Every one of these titles names a company and a number while describing a
+    card that is not in a slab. Counting them as graded sales drags the graded
+    price down towards the raw price — and the gap between those two numbers is
+    the entire grading decision.
+    """
+    assert sales_import.parse_grade_from_title(title) is None
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "PSA 10 GEM MINT Umbreon VMAX Alt Art 215/203",
+        "PSA 10 Gem Mint Moonbreon",
+        "CGC 9.5 Charizard Base Set 4/102",
+        "Umbreon VMAX 215/203 PSA 10 Pop 1200",
+        "PSA 9 MINT Charizard Holo Shadowless",
+    ],
+)
+def test_a_real_slab_still_reads_as_one(title: str):
+    """The other half, and the reason the patterns above are narrow.
+
+    "Gem Mint" is PSA's own name for a 10 and is in genuine slab titles
+    constantly, so it is deliberately not an aspiration word. Over-matching here
+    would throw away the graded comparables instead of corrupting them — a
+    different failure, equally bad.
+    """
+    assert sales_import.parse_grade_from_title(title) is not None
+
+
+def test_a_hoped_for_grade_still_counts_as_a_raw_sale():
+    """It is a real sale of a real raw card, so it is kept as one."""
+    assert verdict("Umbreon VMAX 215/203 PSA 10 READY", grade_label="raw") is None
+
+
+def test_a_hoped_for_grade_is_excluded_from_the_slab_it_names():
+    """Without this it would be kept as a PSA 10 comparable *because* it says PSA 10."""
+    assert (
+        verdict("Umbreon VMAX 215/203 PSA 10 READY", grade_label="PSA 10")
+        == SaleExclusionReason.WRONG_GRADE.value
+    )
 
 
 # --- Exclusion heuristics ----------------------------------------------------

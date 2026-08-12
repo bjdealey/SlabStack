@@ -51,6 +51,29 @@ def load_provider(source: DataSource) -> MarketDataProvider:
     return provider_class(config=config, api_key=api_key)
 
 
+def credential_names(source: DataSource) -> list[str]:
+    """Every environment variable this source reads, in the order it needs them.
+
+    Most sources want one key. eBay wants a client id *and* a client secret, and
+    reporting only the first would put a green tick beside a source that cannot
+    authenticate. Extra ones are declared in ``config`` under a ``*_env_var``
+    key — the name, never the value, which is the rule that keeps the database
+    safe to copy around.
+    """
+    names: list[str] = []
+    if source.api_key_env_var:
+        names.append(source.api_key_env_var)
+    for key, value in (source.config or {}).items():
+        if key.endswith("_env_var") and isinstance(value, str) and value not in names:
+            names.append(value)
+    return names
+
+
+def credentials_present(source: DataSource) -> dict[str, bool]:
+    """Which of them are actually set, for the UI and the doctor."""
+    return {name: bool(os.environ.get(name)) for name in credential_names(source)}
+
+
 def enabled_sources(db: Session) -> list[DataSource]:
     return list(
         db.scalars(

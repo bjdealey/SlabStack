@@ -1170,8 +1170,10 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
         fail(
           'conflict',
           'The demo has no server and no network, so there is nothing to refresh from. This ' +
-            'works in the real app: enable a data source, link a card to the catalogue, and ' +
-            'prices are fetched into your own database.',
+            'works in the real app: enable a source and prices are fetched into your own ' +
+            'database. The card catalogue needs each card linked to it once; eBay does not, ' +
+            'because it is searched by name — and it is the one that brings back individual ' +
+            'sold listings, which is what fills the graded prices the grading decision needs.',
           409,
         ),
     ],
