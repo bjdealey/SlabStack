@@ -152,6 +152,18 @@ liquidity, which needs actual trades.
    never came from eBay.
 4. **Settings → Data sources → eBay → Enable**, then **Refresh prices**.
 
+Either path works for the keys — `.env` or the shell:
+
+```bash
+cp .env.example .env       # edit it, then no export is needed
+docker compose up --build  # or: make api
+make doctor
+```
+
+`.env` goes in the repository root or `backend/`, and is read the same way by `docker compose`,
+`make api` and `make doctor`. A variable exported in your shell beats the file, so a stale `.env`
+never silently overrides a key you just set on the command line.
+
 Nothing needs linking: eBay is searched by name, so every card in your collection is eligible
 immediately. If you are not on the UK marketplace, change `marketplace` in the source's config
 (`EBAY_US`, `EBAY_DE`, …) and set the matching exchange rate.

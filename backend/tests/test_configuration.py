@@ -7,6 +7,8 @@ up immediately.
 
 from __future__ import annotations
 
+import os
+
 from fastapi.testclient import TestClient
 
 
@@ -277,3 +279,37 @@ def test_sources_needing_a_key_stay_off(client: TestClient):
     sources = {row["code"]: row for row in client.get("/api/data-sources").json()}
     for code in ("pokeprice", "pricecharting", "ebay", "cardmarket", "tcgplayer"):
         assert sources[code]["enabled"] is False, code
+
+
+def test_a_key_in_dotenv_actually_reaches_the_provider_lookup(tmp_path, monkeypatch):
+    """`.env` has to populate os.environ, not just the Settings model.
+
+    Provider credentials cannot be declared fields on Settings — which variable
+    a source reads is a row in `data_sources`, chosen at runtime — so they are
+    looked up with os.environ.get. Pydantic reads `.env` into the model and
+    discards anything undeclared, which meant a key written into `.env` was
+    silently dropped and reported as "not set" while the user looked at the line
+    they had just added.
+    """
+    from app import config
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("SLABSTACK_TEST_PROVIDER_KEY=written-in-dotenv\n")
+    monkeypatch.setattr(config, "ENV_FILES", (env_file,))
+    monkeypatch.delenv("SLABSTACK_TEST_PROVIDER_KEY", raising=False)
+
+    assert config.load_env_files() == ["SLABSTACK_TEST_PROVIDER_KEY"]
+    assert os.environ["SLABSTACK_TEST_PROVIDER_KEY"] == "written-in-dotenv"
+
+
+def test_an_exported_variable_beats_dotenv(tmp_path, monkeypatch):
+    """The shell is the more deliberate statement; a stale file must not win."""
+    from app import config
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("SLABSTACK_TEST_PROVIDER_KEY=stale-file-value\n")
+    monkeypatch.setattr(config, "ENV_FILES", (env_file,))
+    monkeypatch.setenv("SLABSTACK_TEST_PROVIDER_KEY", "set-on-the-command-line")
+
+    assert config.load_env_files() == []
+    assert os.environ["SLABSTACK_TEST_PROVIDER_KEY"] == "set-on-the-command-line"
