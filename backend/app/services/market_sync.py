@@ -34,11 +34,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.enums import Confidence
-from app.models import Card, DataSource, MarketPrice, PriceSnapshot
-from app.services import settings_service
-from app.services.market_data.base import MarketDataProvider, MarketKey
-from app.services.market_data.http import ProviderRequestError
+from app.models import Card, DataSource, MarketListing, MarketPrice, PriceSnapshot
+from app.services import market_service, sales_import, settings_service
+from app.services.identity import grade_label as build_grade_label
+from app.services.market_data.base import CardQuery, MarketDataProvider, MarketKey
+from app.services.market_data.http import CapabilityDeniedError, ProviderRequestError
 from app.services.market_data.registry import ProviderUnavailableError, load_provider
+from app.services.market_service import MarketParameters
 
 __all__ = [
     "CardSyncOutcome",
@@ -65,6 +67,20 @@ class CardSyncOutcome:
     fx_rate: float | None = None
     reason: str | None = None
 
+    # --- Sales-level sources -------------------------------------------------
+    # An aggregate source answers with one number; a marketplace answers with
+    # evidence, and how much of it arrived — and how much was thrown away, and
+    # for which grades — is the interesting part of the run.
+    sales_imported: int = 0
+    sales_updated: int = 0
+    sales_excluded: int = 0
+    #: Grade labels this card gained sales for, raw first. The graded ones are
+    #: the point: they are what the raw price is compared against.
+    grades: list[str] = field(default_factory=list)
+    listings_seen: int = 0
+    #: What the source says exists, when it says. ``listings_seen`` is one page.
+    listings_reported: int | None = None
+
 
 @dataclass
 class SyncReport:
@@ -81,6 +97,10 @@ class SyncReport:
     cards: list[CardSyncOutcome] = field(default_factory=list)
     #: Things true of the run as a whole rather than of one card.
     notes: list[str] = field(default_factory=list)
+    #: Run totals for a sales-level source. Zero for an aggregate one.
+    sales_imported: int = 0
+    sales_excluded: int = 0
+    listings_seen: int = 0
 
 
 # --- Currency ----------------------------------------------------------------
@@ -139,21 +159,34 @@ def sync_source(
     except ProviderUnavailableError as exc:
         return _abort(db, source, report, str(exc))
 
-    if not provider.capabilities().current_price:
+    caps = provider.capabilities()
+    if not (caps.current_price or caps.sales_history or caps.active_listings):
         return _abort(
             db,
             source,
             report,
-            f"{source.name} does not supply prices, so there is nothing to sync from it.",
+            f"{source.name} supplies neither prices nor sales, so there is nothing to sync "
+            "from it.",
         )
 
-    cards = _cards_to_sync(db, source, card_ids=card_ids, limit=limit)
+    cards, eligible = _cards_to_sync(db, source, provider, card_ids=card_ids, limit=limit)
     report.requested = len(cards)
+    if eligible > len(cards):
+        # Never a silent cap. A run that quietly covered the first 200 of 900
+        # cards reads exactly like one that covered everything, and the missing
+        # 700 look like cards with no market rather than cards not asked about.
+        report.notes.append(
+            f"{eligible} card(s) could be synced from this source and this run took the first "
+            f"{len(cards)}, most recently updated first. Run it again for the rest, or raise the "
+            "limit — sources are rate limited on purpose, so a whole collection takes a while."
+        )
     if not cards:
         report.status = "insufficient_data"
         report.reason = (
             "No card is linked to this source yet. Look a card up in the catalogue and confirm "
             "the match — the link is stored, and future syncs use it."
+            if provider.requires_external_id
+            else "There is no card to look up. Add a card to your collection first."
         )
         _record(db, source, report)
         return report
@@ -161,9 +194,19 @@ def sync_source(
     values = settings_service.get_all(db)
     currency = values.get("currency", "GBP")
     rates = values.get("fx_rates") or {}
+    params = MarketParameters.from_settings(values)
 
     for card in cards:
-        outcome = _sync_one(db, provider, card, source=source, currency=currency, rates=rates)
+        outcome = _sync_one(
+            db,
+            provider,
+            card,
+            source=source,
+            currency=currency,
+            rates=rates,
+            params=params,
+            report=report,
+        )
         report.cards.append(outcome)
 
         if outcome.status == "updated":
@@ -172,6 +215,10 @@ def sync_source(
             report.failed += 1
         else:
             report.skipped += 1
+
+        report.sales_imported += outcome.sales_imported + outcome.sales_updated
+        report.sales_excluded += outcome.sales_excluded
+        report.listings_seen += outcome.listings_seen
 
     _summarise(report, currency=currency, rates=rates)
     _record(db, source, report)
@@ -186,15 +233,46 @@ def _sync_one(
     source: DataSource,
     currency: str,
     rates: dict,
+    params: MarketParameters,
+    report: SyncReport,
 ) -> CardSyncOutcome:
+    """Take from this source whatever it actually has for this card.
+
+    A source is not one shape. A catalogue answers with an aggregate price; a
+    marketplace answers with sales and with what is currently on sale. Both are
+    worth having and one source may supply several, so this asks for each thing
+    the provider claims and lets the answers accumulate on one outcome.
+    """
     outcome = CardSyncOutcome(card_id=card.id, name=_display(card), status="skipped")
+    if not card.catalog_key:
+        outcome.reason = "No catalog key, so nothing fetched could be attached to anything."
+        return outcome
+
+    caps = provider.capabilities()
+    if caps.current_price:
+        _sync_price(db, provider, card, source=source, currency=currency, rates=rates,
+                    outcome=outcome)
+    if caps.sales_history or caps.active_listings:
+        _sync_evidence(db, provider, card, source=source, currency=currency, rates=rates,
+                       params=params, outcome=outcome, report=report)
+    return outcome
+
+
+def _sync_price(
+    db: Session,
+    provider: MarketDataProvider,
+    card: Card,
+    *,
+    source: DataSource,
+    currency: str,
+    rates: dict,
+    outcome: CardSyncOutcome,
+) -> CardSyncOutcome:
+    """One aggregate number from a source that keeps an index."""
     external_id = (card.external_ids or {}).get(source.code)
 
     if not external_id:
         outcome.reason = "Not linked to this source yet."
-        return outcome
-    if not card.catalog_key:
-        outcome.reason = "No catalog key, so a price could not be attached to anything."
         return outcome
 
     key = MarketKey(
@@ -313,6 +391,281 @@ def _write_price(
         snapshot.currency = currency
 
 
+# --- Sales-level sources -----------------------------------------------------
+
+
+def _sync_evidence(
+    db: Session,
+    provider: MarketDataProvider,
+    card: Card,
+    *,
+    source: DataSource,
+    currency: str,
+    rates: dict,
+    params: MarketParameters,
+    outcome: CardSyncOutcome,
+    report: SyncReport,
+) -> None:
+    """Individual sales, and what is on sale right now.
+
+    The difference from a price sync is worth stating: nothing here writes a
+    valuation. It writes *evidence* — sales into ``market_sales``, listings into
+    ``market_listings`` — and then asks the pricing engine to recompute from it.
+    So a provider-supplied number and a user-supplied one go through exactly the
+    same arithmetic, the same exclusion rules and the same outlier fence, and
+    arrive carrying a sample size instead of standing on someone's authority.
+    """
+    caps = provider.capabilities()
+    key = MarketKey(
+        catalog_key=card.catalog_key,
+        currency=currency,
+        external_id=(card.external_ids or {}).get(source.code),
+        variant=card.variant,
+        query=CardQuery(
+            name=card.name,
+            set_code=card.set_code,
+            set_name=card.set_name,
+            card_number=card.card_number,
+            variant=card.variant,
+            language=card.language,
+        ),
+    )
+
+    imported_any = False
+    if caps.sales_history:
+        imported_any = _import_sales(
+            db, provider, card, key=key, source=source, currency=currency, rates=rates,
+            outcome=outcome, report=report,
+        )
+    if caps.active_listings and outcome.status != "failed":
+        _import_listings(
+            db, provider, card, key=key, source=source, currency=currency, rates=rates,
+            outcome=outcome, report=report,
+        )
+
+    if imported_any:
+        # Re-fence and reprice from the sales that just landed. Without this the
+        # rows exist and every number the user looks at is still the old one.
+        sales_import.mark_outliers(db, card.catalog_key, params=params)
+        market_service.recompute_key(db, card.catalog_key, params=params, currency=currency)
+        outcome.grades = market_service.grade_labels_for(db, card.catalog_key)
+
+
+def _import_sales(
+    db: Session,
+    provider: MarketDataProvider,
+    card: Card,
+    *,
+    key: MarketKey,
+    source: DataSource,
+    currency: str,
+    rates: dict,
+    outcome: CardSyncOutcome,
+    report: SyncReport,
+) -> bool:
+    try:
+        records = provider.get_sales_history(key)
+    except CapabilityDeniedError as exc:
+        # Not a failure. The source is healthy and this part of it is not
+        # granted to this account, which is a different sentence and a different
+        # fix — and the rest of the run continues.
+        _note_once(report, str(exc))
+        outcome.reason = "Sold data is not granted to this application."
+        return False
+    except ProviderRequestError as exc:
+        outcome.status = "failed"
+        outcome.reason = str(exc)
+        return False
+    except Exception as exc:  # One bad adapter must not abort the whole run.
+        outcome.status = "failed"
+        outcome.reason = f"{source.name} adapter raised {type(exc).__name__}: {exc}"
+        return False
+
+    rows: list[sales_import.ImportRow] = []
+    unconvertible: set[str] = set()
+    for record in records:
+        minor, _rate = convert_minor(
+            record.price_minor, from_currency=record.currency, to_currency=currency, rates=rates
+        )
+        if minor is None:
+            # Same refusal as the price path, for the same reason: a guessed
+            # rate would rescale a whole sample and look entirely plausible.
+            unconvertible.add(record.currency)
+            continue
+        shipping = None
+        if record.shipping_minor is not None:
+            shipping, _ = convert_minor(
+                record.shipping_minor,
+                from_currency=record.currency,
+                to_currency=currency,
+                rates=rates,
+            )
+        rows.append(
+            sales_import.ImportRow(
+                sale_date=record.sale_date,
+                sale_price_minor=minor,
+                shipping_minor=shipping,
+                currency=currency,
+                listing_title=record.listing_title,
+                platform=record.platform,
+                seller=record.seller,
+                source_url=record.source_url,
+                external_id=record.external_id,
+                lot_size=record.lot_size,
+                is_auction=record.is_auction,
+            )
+        )
+
+    if unconvertible:
+        outcome.source_currency = sorted(unconvertible)[0]
+        outcome.reason = (
+            f"{len(records) - len(rows)} sale(s) in {'/'.join(sorted(unconvertible))} were "
+            f"fetched but not written: no rate to {currency} is set. Add one in Settings → "
+            "Market and run this again."
+        )
+
+    if not rows:
+        if not unconvertible:
+            outcome.reason = outcome.reason or f"{source.name} has no recent sales for this card."
+        return False
+
+    # The card's own identity is what the exclusion rules compare a listing
+    # title against — a Japanese copy or a reverse holo is not a comparable for
+    # this card even when the name matches exactly.
+    context = sales_import.SaleContext(
+        catalog_key=card.catalog_key,
+        language=card.language,
+        variant=card.variant,
+        printing=card.printing,
+    )
+    imported = sales_import.import_rows(
+        db,
+        rows,
+        context=context,
+        source_code=source.code,
+        card_id=card.id,
+        default_currency=currency,
+    )
+
+    outcome.status = "updated"
+    outcome.sales_imported = imported.imported
+    outcome.sales_updated = imported.updated
+    outcome.sales_excluded = imported.excluded
+    return bool(imported.total)
+
+
+def _import_listings(
+    db: Session,
+    provider: MarketDataProvider,
+    card: Card,
+    *,
+    key: MarketKey,
+    source: DataSource,
+    currency: str,
+    rates: dict,
+    outcome: CardSyncOutcome,
+    report: SyncReport,
+) -> None:
+    """What is currently on sale. Asking prices, and never recorded as sales.
+
+    They exist for one number: the sold-to-active ratio. Fifty copies listed and
+    two sold a month is a different market from two listed and two sold, at
+    identical prices, and only the second one is worth grading into.
+    """
+    try:
+        records = provider.get_listings(key)
+    except CapabilityDeniedError as exc:
+        _note_once(report, str(exc))
+        return
+    except ProviderRequestError as exc:
+        _note_once(report, f"Active listings could not be fetched: {exc}")
+        return
+    except Exception as exc:
+        _note_once(report, f"{source.name} adapter raised {type(exc).__name__} on listings: {exc}")
+        return
+
+    # Everything previously seen from this source for this card is stale until
+    # proved otherwise. Marking rather than deleting, so a listing that comes
+    # back keeps its history, and so a failed fetch above leaves the table
+    # untouched rather than emptied.
+    for stale in db.scalars(
+        select(MarketListing).where(
+            MarketListing.catalog_key == card.catalog_key,
+            MarketListing.source_id == source.id,
+            MarketListing.is_active.is_(True),
+        )
+    ):
+        stale.is_active = False
+
+    seen = 0
+    reported: int | None = None
+    for record in records:
+        minor, _rate = convert_minor(
+            record.price_minor, from_currency=record.currency, to_currency=currency, rates=rates
+        )
+        if minor is None:
+            continue
+        reported = reported or (record.raw or {}).get("result_total")
+        _write_listing(
+            db, card=card, source=source, record=record, value_minor=minor, currency=currency
+        )
+        seen += 1
+
+    outcome.listings_seen = seen
+    # What the source says exists, which is the honest denominator. One page of
+    # results is not the size of the market.
+    outcome.listings_reported = reported if isinstance(reported, int) else None
+    if outcome.status == "skipped" and seen:
+        outcome.status = "updated"
+
+
+def _write_listing(
+    db: Session,
+    *,
+    card: Card,
+    source: DataSource,
+    record,
+    value_minor: int,
+    currency: str,
+) -> None:
+    row = None
+    if record.external_id:
+        row = db.scalars(
+            select(MarketListing).where(
+                MarketListing.source_id == source.id,
+                MarketListing.external_id == record.external_id,
+            )
+        ).first()
+    if row is None:
+        row = MarketListing(catalog_key=card.catalog_key, price_minor=value_minor)
+        db.add(row)
+
+    parsed = sales_import.parse_grade_from_title(record.listing_title)
+    row.catalog_key = card.catalog_key
+    row.card_id = card.id
+    row.grade_label = build_grade_label(*parsed) if parsed else "raw"
+    row.grade = parsed[1] if parsed else None
+    row.platform = record.platform
+    row.listed_at = record.listed_at
+    row.price_minor = value_minor
+    row.currency = currency
+    row.listing_title = record.listing_title
+    row.source_url = record.source_url
+    row.seller = record.seller
+    row.is_auction = record.is_auction
+    row.is_active = True
+    row.source_id = source.id
+    row.external_id = record.external_id
+    row.raw_payload = record.raw or None
+    row.seen_at = datetime.now(UTC)
+
+
+def _note_once(report: SyncReport, message: str) -> None:
+    """Per-run facts, said once however many cards hit them."""
+    if message not in report.notes:
+        report.notes.append(message)
+
+
 def sync_cards(db: Session, *, card_ids: list[str] | None = None, limit: int = 200) -> list[SyncReport]:
     """Run every enabled price source, best priority first."""
     reports: list[SyncReport] = []
@@ -339,15 +692,31 @@ def _price_sources(db: Session) -> list[DataSource]:
 
 
 def _cards_to_sync(
-    db: Session, source: DataSource, *, card_ids: list[str] | None, limit: int
-) -> list[Card]:
+    db: Session,
+    source: DataSource,
+    provider: MarketDataProvider,
+    *,
+    card_ids: list[str] | None,
+    limit: int,
+) -> tuple[list[Card], int]:
+    """Which cards this source could say anything about, and how many that was.
+
+    A catalogue needs to have been told its own id for the card, so only linked
+    cards qualify. A marketplace is searched by name, so every card qualifies —
+    filtering to linked ones there would return nothing at all, forever, and
+    look exactly like a working sync with an empty collection.
+
+    Returns the capped list *and* the eligible total, so the caller can say when
+    it did not get to everything.
+    """
     stmt = select(Card).where(Card.catalog_key.is_not(None))
     if card_ids:
         stmt = stmt.where(Card.id.in_(card_ids))
     cards = list(db.scalars(stmt.order_by(Card.updated_at.desc())))
 
-    linked = [card for card in cards if (card.external_ids or {}).get(source.code)]
-    return linked[:limit]
+    if provider.requires_external_id:
+        cards = [card for card in cards if (card.external_ids or {}).get(source.code)]
+    return cards[:limit], len(cards)
 
 
 def _summarise(report: SyncReport, *, currency: str, rates: dict) -> None:

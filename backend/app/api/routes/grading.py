@@ -24,6 +24,7 @@ from app.models import (
 )
 from app.money import to_minor
 from app.schemas.grading import (
+    CredentialOut,
     DataSourceOut,
     GradeRuleOut,
     GradeRuleWrite,
@@ -36,6 +37,7 @@ from app.schemas.grading import (
     SellingProfileOut,
     SellingProfileWrite,
 )
+from app.services.market_data.registry import credentials_present
 
 router = APIRouter(tags=["configuration"])
 
@@ -407,6 +409,10 @@ def list_data_sources(db: DbSession) -> list[DataSourceOut]:
                 api_key_present=bool(
                     source.api_key_env_var and os.environ.get(source.api_key_env_var)
                 ),
+                credentials=[
+                    CredentialOut(env_var=name, present=present)
+                    for name, present in credentials_present(source).items()
+                ],
                 last_sync_at=source.last_sync_at.isoformat() if source.last_sync_at else None,
                 last_sync_status=source.last_sync_status,
                 terms_url=source.terms_url,

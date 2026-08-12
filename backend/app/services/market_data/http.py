@@ -25,6 +25,7 @@ from typing import Any, Protocol
 import httpx
 
 __all__ = [
+    "CapabilityDeniedError",
     "HttpxTransport",
     "ProviderRequestError",
     "RecordedTransport",
@@ -48,10 +49,23 @@ class ProviderRequestError(RuntimeError):
         self.retryable = retryable
 
 
+class CapabilityDeniedError(ProviderRequestError):
+    """The source is up and the credentials work — this *one* thing is not granted.
+
+    Distinct from a failure because it is neither a mistake nor an outage, and
+    it must not stop a run. Providers gate parts of themselves behind separate
+    approval (eBay's sold data being the case that prompted this), so a source
+    can be perfectly healthy and still refuse one of the things it advertises.
+    The sync notes it and carries on with whatever else that source can do.
+    """
+
+
 class Transport(Protocol):
     """The seam. Real adapters get HTTP; tests get a dictionary."""
 
     def get_json(self, url: str, *, params: dict[str, Any], headers: dict[str, str]) -> dict: ...
+
+    def post_form(self, url: str, *, data: dict[str, str], headers: dict[str, str]) -> dict: ...
 
 
 @dataclass
@@ -77,12 +91,36 @@ class HttpxTransport:
         self._last_request_at = time.monotonic()
 
     def get_json(self, url: str, *, params: dict[str, Any], headers: dict[str, str]) -> dict:
+        return self._request(url, headers=headers, params=params)
+
+    def post_form(self, url: str, *, data: dict[str, str], headers: dict[str, str]) -> dict:
+        """A form-encoded POST, which is what OAuth token endpoints take.
+
+        Kept to exactly this shape rather than a general POST: the only reason
+        this build ever posts anything is to exchange credentials for a token,
+        and a narrow method is one that cannot quietly grow into writing to
+        somebody's marketplace account.
+        """
+        return self._request(url, headers=headers, data=data)
+
+    def _request(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        params: dict[str, Any] | None = None,
+        data: dict[str, str] | None = None,
+    ) -> dict:
         merged = {"User-Agent": self.user_agent, "Accept": "application/json", **headers}
+        post = data is not None
 
         for attempt in (1, 2):
             self._wait_turn()
             try:
-                response = httpx.get(url, params=params, headers=merged, timeout=self.timeout)
+                if post:
+                    response = httpx.post(url, data=data, headers=merged, timeout=self.timeout)
+                else:
+                    response = httpx.get(url, params=params, headers=merged, timeout=self.timeout)
             except httpx.TimeoutException as exc:
                 if attempt == 1:
                     continue
@@ -160,9 +198,18 @@ class RecordedTransport:
 
     def get_json(self, url: str, *, params: dict[str, Any], headers: dict[str, str]) -> dict:
         self.calls.append((url, dict(params), dict(headers)))
+        return self._recorded(url)
+
+    def post_form(self, url: str, *, data: dict[str, str], headers: dict[str, str]) -> dict:
+        self.calls.append((url, dict(data), dict(headers)))
+        return self._recorded(url)
+
+    def _recorded(self, url: str) -> dict:
         if url not in self.responses:
             raise ProviderRequestError(f"No recorded response for {url}.")
         recorded = self.responses[url]
-        if isinstance(recorded, Exception):  # pragma: no cover - defensive
+        if isinstance(recorded, Exception):
+            # Recording a failure is as important as recording a success: an
+            # adapter's behaviour on a 403 is behaviour, and it needs testing.
             raise recorded
         return recorded

@@ -240,9 +240,24 @@ def test_refresh_refuses_when_every_source_is_off(client: TestClient):
 
 def test_enabling_a_source_without_an_adapter_is_refused(client: TestClient):
     """The disabled rows advertise what is planned, not what can be switched on."""
-    response = client.patch("/api/data-sources/ebay", json={"enabled": True})
+    response = client.patch("/api/data-sources/cardmarket", json={"enabled": True})
     assert response.status_code == 409
     assert "has no adapter" in response.json()["error"]["message"]
+
+
+def test_ebay_ships_off_but_ready(client: TestClient):
+    """The opposite call from the catalogue source, for the opposite reason.
+
+    It cannot do anything without two credentials, so switching it on by default
+    would produce a source that is on and failing rather than one that works.
+    """
+    row = {r["code"]: r for r in client.get("/api/data-sources").json()}["ebay"]
+    assert row["has_adapter"] is True
+    assert row["enabled"] is False
+    assert [c["env_var"] for c in row["credentials"]] == [
+        "SLABSTACK_EBAY_APP_ID",
+        "SLABSTACK_EBAY_CERT_ID",
+    ], "both halves of the credential pair are reported, not just the first"
 
 
 def test_the_free_catalogue_source_ships_switched_on(client: TestClient):

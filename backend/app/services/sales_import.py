@@ -191,6 +191,47 @@ GRADE_IN_TITLE = re.compile(
 # "Ungraded"/"raw" said explicitly — a positive claim that this is not a slab.
 RAW_IN_TITLE = re.compile(r"\b(?:raw|ungraded|un-graded)\b", re.IGNORECASE)
 
+# A grade the seller *hopes* for, on a card that is not in a slab. Marketplace
+# titles are full of these — "PSA 10 READY", "would grade a 9 easy", "gem mint
+# candidate" — and every one of them names a grading company and a number, so
+# the pattern above reads them as completed graded sales.
+#
+# That is the most damaging mistake available to this module. The grading
+# decision is raw-versus-slab, so the graded price is one of the two numbers the
+# whole application exists to compare; filling it with raw cards priced as
+# aspirations drags it down towards the raw price and makes grading look
+# pointless. It fails silently, because the result is still a plausible number.
+#
+# Two shapes, kept separate because they carry different risks:
+#
+# 1. Proximity — a grade immediately followed by an aspiration word. Narrow on
+#    purpose. "Gem Mint" is *excluded* from this list: it is PSA's own name for
+#    a 10 and appears in genuine slab titles constantly.
+# 2. Phrases that cannot mean anything else, wherever they appear.
+ASPIRATIONAL_GRADE = re.compile(
+    r"\b(?:psa|cgc|bgs|beckett|sgc|ace|tag|gma|hga)\s*[-:]?\s*(?:10|[1-9](?:\.5)?)\s*\+?\s*"
+    r"(?:ready|candidate|potential|worthy|material|contender|quality|hopeful)\b"
+    r"|\bready\s+(?:for|to)\s+(?:be\s+)?grad"
+    r"|\b(?:would|could|should|will|might)\s+(?:easily\s+|likely\s+|probably\s+)?grade\b"
+    r"|\bgrade[-\s]?ready\b"
+    r"|\bpre[-\s]?grade"
+    r"|\bgrad(?:e)?able\b"
+    r"|\bnot\s+graded\b"
+    r"|\bsend\s+(?:it\s+)?(?:off\s+|away\s+)?(?:for|to)\s+grad",
+    re.IGNORECASE,
+)
+
+
+def claims_ungraded(title: str | None) -> bool:
+    """Does this title positively say the card is *not* in a slab?
+
+    Either by saying so outright, or by naming a grade it hopes to get — which
+    only a raw card is ever described as hoping for.
+    """
+    if not title:
+        return False
+    return bool(RAW_IN_TITLE.search(title) or ASPIRATIONAL_GRADE.search(title))
+
 
 @dataclass
 class SaleContext:
@@ -288,8 +329,17 @@ def _variant_mismatch(title: str, expected: str | None, printing: str | None = N
 
 
 def parse_grade_from_title(title: str | None) -> tuple[str, float] | None:
-    """Pull ``("PSA", 10.0)`` out of a listing title, if it names a grade."""
+    """Pull ``("PSA", 10.0)`` out of a listing title, if it names a *real* grade.
+
+    ``None`` for a title that only hopes for one. Such a sale is still a sale —
+    it falls through to ``raw``, which is what it actually is, rather than being
+    thrown away. It carries some hype premium over a plainly-listed raw copy,
+    which is the conservative direction to be wrong in: it raises the raw price
+    the grading decision is measured against.
+    """
     if not title:
+        return None
+    if claims_ungraded(title):
         return None
     match = GRADE_IN_TITLE.search(title)
     if match is None:
@@ -309,9 +359,12 @@ def _grade_mismatch(title: str, expected_label: str | None) -> bool:
         return False
     parsed = parse_grade_from_title(title)
     if parsed is None:
-        # A title that says "raw"/"ungraded" while we are valuing a slab is a
-        # mismatch; saying nothing at all is not.
-        return bool(RAW_IN_TITLE.search(title)) and want != "raw"
+        # A title that says it is not in a slab, while we are valuing one, is a
+        # mismatch; saying nothing at all is not. "PSA 10 ready" counts as
+        # saying so — it is how a raw card is advertised, and without this it
+        # would be kept as a PSA 10 comparable precisely because it says
+        # "PSA 10".
+        return claims_ungraded(title) and want != "raw"
     company, grade = parsed
     return build_grade_label(company, grade).lower() != want
 

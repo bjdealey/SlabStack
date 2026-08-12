@@ -303,7 +303,7 @@
         "type": "money",
         "default": 25.0,
         "category": "thresholds",
-        "description": "A 300% ROI on a \u00a33 card is still not worth the postage.",
+        "description": "A 300% ROI on a £3 card is still not worth the postage.",
         "minimum": 0.0,
         "maximum": null,
         "options": [],
@@ -938,7 +938,7 @@
           "sort_order": 10,
           "source_url": "https://www.cgccards.com",
           "source_checked_at": "2026-08-10",
-          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly \u2014 verify against the company's current price list before submitting."
+          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly — verify against the company's current price list before submitting."
         },
         {
           "id": "c78956fde488469fb7b7d8216c174635",
@@ -963,7 +963,7 @@
           "sort_order": 20,
           "source_url": "https://www.cgccards.com",
           "source_checked_at": "2026-08-10",
-          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly \u2014 verify against the company's current price list before submitting."
+          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly — verify against the company's current price list before submitting."
         },
         {
           "id": "a8617a4ceb2d44ccb2c3bd7f6c44797b",
@@ -988,7 +988,7 @@
           "sort_order": 30,
           "source_url": "https://www.cgccards.com",
           "source_checked_at": "2026-08-10",
-          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly \u2014 verify against the company's current price list before submitting."
+          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly — verify against the company's current price list before submitting."
         }
       ],
       "memberships": [
@@ -1047,7 +1047,7 @@
           "sort_order": 10,
           "source_url": "https://acegrading.com",
           "source_checked_at": "2026-08-10",
-          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly \u2014 verify against the company's current price list before submitting."
+          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly — verify against the company's current price list before submitting."
         },
         {
           "id": "1ea2c044e5144dfea5c70bad449ac174",
@@ -1072,7 +1072,7 @@
           "sort_order": 20,
           "source_url": "https://acegrading.com",
           "source_checked_at": "2026-08-10",
-          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly \u2014 verify against the company's current price list before submitting."
+          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly — verify against the company's current price list before submitting."
         },
         {
           "id": "3172320e979840eda885340cbd84130f",
@@ -1097,7 +1097,7 @@
           "sort_order": 30,
           "source_url": "https://acegrading.com",
           "source_checked_at": "2026-08-10",
-          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly \u2014 verify against the company's current price list before submitting."
+          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly — verify against the company's current price list before submitting."
         },
         {
           "id": "71f68d7314cb4edf947bac39233bbb1f",
@@ -1122,7 +1122,7 @@
           "sort_order": 40,
           "source_url": "https://acegrading.com",
           "source_checked_at": "2026-08-10",
-          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly \u2014 verify against the company's current price list before submitting."
+          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly — verify against the company's current price list before submitting."
         },
         {
           "id": "65a6ba709ec94fa3ab405243b97ac718",
@@ -1147,7 +1147,7 @@
           "sort_order": 50,
           "source_url": "https://acegrading.com",
           "source_checked_at": "2026-08-10",
-          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly \u2014 verify against the company's current price list before submitting."
+          "notes": "Seeded from the product specification (August 2026). Grader pricing changes regularly — verify against the company's current price list before submitting."
         }
       ],
       "memberships": [
@@ -1224,7 +1224,7 @@
       "is_default": true,
       "active": true,
       "sort_order": 10,
-      "notes": "Default fee estimate \u2014 check your own eBay fee rate and update it."
+      "notes": "Default fee estimate — check your own eBay fee rate and update it."
     },
     {
       "id": "d6e0383cd1e245129e22c15d18c718ea",
@@ -1246,7 +1246,7 @@
       "is_default": false,
       "active": true,
       "sort_order": 20,
-      "notes": "Commission estimate \u2014 verify your current Cardmarket rate."
+      "notes": "Commission estimate — verify your current Cardmarket rate."
     },
     {
       "id": "a57133616b1344bca3021111f5f4bfdf",
@@ -1268,7 +1268,7 @@
       "is_default": false,
       "active": true,
       "sort_order": 30,
-      "notes": "No fees. Usually means a lower achievable price \u2014 reflect that in the quick-sale discount."
+      "notes": "No fees. Usually means a lower achievable price — reflect that in the quick-sale discount."
     }
   ],
   "dataSources": [
@@ -1283,6 +1283,7 @@
       "priority": 10,
       "has_adapter": true,
       "api_key_present": false,
+      "credentials": [],
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": null,
@@ -1299,6 +1300,7 @@
       "priority": 20,
       "has_adapter": true,
       "api_key_present": false,
+      "credentials": [],
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": null,
@@ -1315,6 +1317,12 @@
       "priority": 30,
       "has_adapter": false,
       "api_key_present": false,
+      "credentials": [
+        {
+          "env_var": "SLABSTACK_POKEPRICE_API_KEY",
+          "present": false
+        }
+      ],
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": null,
@@ -1331,6 +1339,12 @@
       "priority": 40,
       "has_adapter": false,
       "api_key_present": false,
+      "credentials": [
+        {
+          "env_var": "SLABSTACK_PRICECHARTING_API_KEY",
+          "present": false
+        }
+      ],
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": null,
@@ -1345,12 +1359,22 @@
       "api_key_env_var": "SLABSTACK_EBAY_APP_ID",
       "enabled": false,
       "priority": 50,
-      "has_adapter": false,
+      "has_adapter": true,
       "api_key_present": false,
+      "credentials": [
+        {
+          "env_var": "SLABSTACK_EBAY_APP_ID",
+          "present": false
+        },
+        {
+          "env_var": "SLABSTACK_EBAY_CERT_ID",
+          "present": false
+        }
+      ],
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": "https://developer.ebay.com/api-docs/static/ebay-rest-landing.html",
-      "notes": "Real sold listings \u2014 the best fit for these engines, since liquidity and trend need individual sales. Needs a developer app, and Marketplace Insights needs separate approval. Official API only, under its terms: never scraped."
+      "notes": "Individual sold listings — the only source here that can fill the graded side of the grading decision, because slabs sell on eBay with the grade in the title. Also the only one that can measure liquidity, which needs real trades. Needs a developer application for SLABSTACK_EBAY_APP_ID and SLABSTACK_EBAY_CERT_ID; sold data additionally needs Marketplace Insights approval, without which active listings still work. Official API under its terms, never scraped."
     },
     {
       "id": "1e1fa7121aca44b58036f8f1432e144d",
@@ -1363,6 +1387,12 @@
       "priority": 60,
       "has_adapter": false,
       "api_key_present": false,
+      "credentials": [
+        {
+          "env_var": "SLABSTACK_CARDMARKET_TOKEN",
+          "present": false
+        }
+      ],
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": null,
@@ -1379,6 +1409,12 @@
       "priority": 70,
       "has_adapter": false,
       "api_key_present": false,
+      "credentials": [
+        {
+          "env_var": "SLABSTACK_TCGPLAYER_TOKEN",
+          "present": false
+        }
+      ],
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": null,
@@ -1387,7 +1423,7 @@
     {
       "id": "1ea721664197470f898e076336805050",
       "code": "pokemontcg_io",
-      "name": "Pok\u00e9mon TCG API",
+      "name": "Pokémon TCG API",
       "kind": "card_catalog",
       "base_url": "https://api.pokemontcg.io/v2",
       "api_key_env_var": "SLABSTACK_POKEMONTCG_API_KEY",
@@ -1395,6 +1431,12 @@
       "priority": 80,
       "has_adapter": true,
       "api_key_present": false,
+      "credentials": [
+        {
+          "env_var": "SLABSTACK_POKEMONTCG_API_KEY",
+          "present": false
+        }
+      ],
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": "https://pokemontcg.io/",

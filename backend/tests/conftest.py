@@ -51,9 +51,13 @@ def no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
             "or monkeypatch load_provider — see tests/test_market_providers.py."
         )
 
-    monkeypatch.setattr(
-        "app.services.market_data.http.HttpxTransport.get_json", refuse, raising=True
-    )
+    # Every method that can reach the network, not just the first one written.
+    # ``post_form`` arrived with OAuth and would otherwise have been an
+    # unguarded hole in exactly the guard that exists to catch this.
+    for method in ("get_json", "post_form"):
+        monkeypatch.setattr(
+            f"app.services.market_data.http.HttpxTransport.{method}", refuse, raising=True
+        )
 
 
 @pytest.fixture(autouse=True)
