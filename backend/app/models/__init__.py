@@ -13,7 +13,7 @@ from app.models.condition import (
     GradeRule,
     PredictionResult,
 )
-from app.models.economics import AppSetting, SellingCostProfile
+from app.models.economics import AppSetting, CardDisposal, SellingCostProfile
 from app.models.grading import (
     GradingCompany,
     GradingMembership,
@@ -33,6 +33,7 @@ __all__ = [
     "AppSetting",
     "Base",
     "Card",
+    "CardDisposal",
     "CardImage",
     "CardSet",
     "CardVariant",

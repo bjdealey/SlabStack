@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ClipboardCheck, Pencil, Scissors, Trash2 } from 'lucide-react'
+import { ArrowLeft, Banknote, ClipboardCheck, Pencil, Scissors, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError, keys } from '@/lib/api'
 import type { CardWrite, ConditionWrite } from '@/lib/types'
@@ -16,6 +16,7 @@ import { MarketPanel } from '@/components/MarketPanel'
 import { GradingRoutes } from '@/components/GradingRoutes'
 import { Recommendation } from '@/components/Recommendation'
 import { SalesList } from '@/components/SalesManager'
+import { SoldDialog } from '@/components/SoldDialog'
 import { StatusBadge } from '@/components/DecisionBadge'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +31,7 @@ export function CardDetail() {
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [assessing, setAssessing] = useState(false)
+  const [selling, setSelling] = useState(false)
   // Shipping belongs to the parcel, not the card, so costing one card means
   // assuming a submission around it. One is the honest worst case.
   const [batchSize, setBatchSize] = useState(1)
@@ -131,6 +133,11 @@ export function CardDetail() {
                 <Scissors /> Split ×{data.quantity}
               </Button>
             ) : null}
+            {/* The only figure in the app that is not a projection, so it is
+                one click from the card rather than buried in a menu. */}
+            <Button size="sm" onClick={() => setSelling(true)}>
+              <Banknote /> {data.status === 'sold' ? 'Sold' : 'Mark sold'}
+            </Button>
             <Button size="sm" onClick={() => setEditing(true)}>
               <Pencil /> Edit
             </Button>
@@ -314,6 +321,8 @@ export function CardDetail() {
           />
         </DialogContent>
       </Dialog>
+
+      <SoldDialog card={data} open={selling} onOpenChange={setSelling} />
     </>
   )
 }

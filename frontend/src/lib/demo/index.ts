@@ -1436,6 +1436,45 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
     ],
     [method === 'GET' && pathname === '/analytics/selling-queue', () => sellingQueue()],
     [
+      method === 'GET' && pathname === '/analytics/realised',
+      // The demo store is rebuilt on every load, so nothing can have been sold
+      // and held. An empty report with the real reason beats inventing sales —
+      // these are the one set of figures in the app that are not projections,
+      // and fabricating them would be the worst possible place to start.
+      () => ({
+        status: 'insufficient_data',
+        reason:
+          'Nothing has been sold in this demo, and its store resets on every load. In the ' +
+          'real app, marking a card sold records what it actually fetched and scores the ' +
+          'decision behind it against the market on the day.',
+        currency: currency(),
+        sold: 0,
+        scored: 0,
+        graded_sales: 0,
+        raw_sales: 0,
+        total_net_proceeds: null,
+        total_realised_profit: null,
+        total_grading_gain: null,
+        items: [],
+        notes: [],
+      }),
+    ],
+    [
+      method === 'GET' && at(0) === 'cards' && at(2) === 'sold',
+      () => null,
+    ],
+    [
+      (method === 'POST' || method === 'DELETE') && at(0) === 'cards' && at(2) === 'sold',
+      () =>
+        fail(
+          'conflict',
+          'The demo resets on every load, so a recorded sale would not survive to be scored. ' +
+            'This works in the real app: mark a card sold and it starts measuring what your ' +
+            'decisions actually made.',
+          409,
+        ),
+    ],
+    [
       method === 'GET' && pathname === '/analytics/assessment-queue',
       // Every demo card ships assessed, which is exactly the population this
       // excludes. An empty queue with the real reason beats a fabricated one.

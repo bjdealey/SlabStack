@@ -11,6 +11,7 @@ part that decides which of those answers you are asked to look at today.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Query, status
@@ -21,7 +22,7 @@ from app.api.errors import ApiError
 from app.api.routes.collection import OpportunityOut
 from app.enums import Confidence
 from app.schemas.common import ApiModel
-from app.services import analytics, portfolio
+from app.services import analytics, disposals, portfolio
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -337,6 +338,91 @@ def submission_returns(db: DbSession) -> SubmissionReturnsOut:
             )
             for entry in result.submissions
         ],
+    )
+
+
+# --- What you actually made --------------------------------------------------
+
+
+class DisposalOutcomeOut(ApiModel):
+    """One closed position, and what it says about the decision behind it."""
+
+    disposal_id: str
+    card_id: str | None = None
+    name: str
+    sold_on: date
+    grade_label: str
+    sold_graded: bool
+    currency: str = "GBP"
+    net_proceeds: float | None = None
+    purchase_price: float | None = None
+    grading_cost: float | None = None
+    realised_profit: float | None = None
+    profit_is_complete: bool = False
+    market_value_on_the_day: float | None = Field(
+        default=None,
+        description=(
+            "What the card was worth the day it sold, from `price_snapshots`. Today's price "
+            "has moved for reasons that have nothing to do with this decision."
+        ),
+    )
+    vs_market_pct: float | None = None
+    raw_value_on_the_day: float | None = None
+    grading_gain: float | None = Field(
+        default=None,
+        description="What the slab netted over the raw card that day, less what grading cost.",
+    )
+    reason: str | None = None
+
+
+class RealisedOut(ApiModel):
+    status: str
+    reason: str | None = None
+    currency: str = "GBP"
+    sold: int = 0
+    scored: int = 0
+    graded_sales: int = 0
+    raw_sales: int = 0
+    total_net_proceeds: float | None = None
+    total_realised_profit: float | None = None
+    total_grading_gain: float | None = None
+    items: list[DisposalOutcomeOut] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+@router.get(
+    "/realised",
+    response_model=RealisedOut,
+    summary="What you actually made, against what was predicted",
+    description=(
+        "Every other figure in this application is a projection. These are the ones that "
+        "happened.\n\n"
+        "`prediction_results` has scored *grade* predictions since Phase 8, so the app could "
+        "tell you it called a PSA 9 correctly while having no idea whether the submission made "
+        "money. This is the other half.\n\n"
+        "**A profit missing a cost is not reported as a profit.** A sale without a recorded "
+        "purchase price, or a graded sale without a recorded grading cost, is counted in the "
+        "proceeds and left out of the profit — a total that silently dropped a cost would be "
+        "wrong in the flattering direction.\n\n"
+        "`market_value_on_the_day` comes from `price_snapshots`, not from today's price: the "
+        "question is whether the decision was right when it was made."
+    ),
+)
+def realised(db: DbSession, limit: Annotated[int, Query(ge=1, le=2000)] = 500) -> RealisedOut:
+    result = disposals.realised(db, limit=limit)
+    return RealisedOut(
+        status=result.status,
+        reason=result.reason,
+        currency=result.currency,
+        sold=result.sold,
+        scored=result.scored,
+        graded_sales=result.graded_sales,
+        raw_sales=result.raw_sales,
+        total_net_proceeds=result.total_net_proceeds,
+        total_realised_profit=result.total_realised_profit,
+        total_grading_gain=result.total_grading_gain,
+        items=[DisposalOutcomeOut(**vars(item)) for item in result.items],
+        notes=result.notes,
     )
 
 

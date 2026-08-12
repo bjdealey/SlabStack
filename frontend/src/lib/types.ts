@@ -1405,6 +1405,82 @@ export interface SyncReport {
   listings_seen: number
 }
 
+/* --- What a card actually sold for ---------------------------------------- */
+
+/** The one figure in this application that is not a projection. */
+export interface Disposal {
+  id: string
+  card_id: string | null
+  card_name: string | null
+  sold_on: string
+  platform: string | null
+  currency: string
+  sold_graded: boolean
+  grade_label: string
+  grade: number | null
+  gross: number
+  shipping_income: number | null
+  fees: number | null
+  postage_cost: number | null
+  packaging_cost: number | null
+  net_proceeds: number
+  /** True when you typed the payout rather than letting it be estimated. */
+  net_is_user_entered: boolean
+  /** Null means unrecorded, never free. */
+  grading_cost: number | null
+  notes: string | null
+}
+
+export interface DisposalWrite {
+  sold_on: string
+  gross: number
+  sold_graded?: boolean
+  grade_label?: string
+  grade?: number | null
+  platform?: string | null
+  net_proceeds?: number | null
+  grading_cost?: number | null
+  notes?: string | null
+}
+
+export interface DisposalOutcome {
+  disposal_id: string
+  card_id: string | null
+  name: string
+  sold_on: string
+  grade_label: string
+  sold_graded: boolean
+  currency: string
+  net_proceeds: number | null
+  purchase_price: number | null
+  grading_cost: number | null
+  realised_profit: number | null
+  /** False when a cost is missing, in which case there is no profit to show. */
+  profit_is_complete: boolean
+  /** What it was worth the day it sold — not today, which has moved since. */
+  market_value_on_the_day: number | null
+  vs_market_pct: number | null
+  raw_value_on_the_day: number | null
+  /** What the slab netted over the raw card that day, less what grading cost. */
+  grading_gain: number | null
+  reason: string | null
+}
+
+export interface RealisedReport {
+  status: BlockStatus
+  reason: string | null
+  currency: string
+  sold: number
+  scored: number
+  graded_sales: number
+  raw_sales: number
+  total_net_proceeds: number | null
+  total_realised_profit: number | null
+  total_grading_gain: number | null
+  items: DisposalOutcome[]
+  notes: string[]
+}
+
 /* --- What to assess first ------------------------------------------------- */
 
 /** One unassessed card, and the most grading could possibly gain. */

@@ -655,15 +655,44 @@ Only cards **priced but not yet assessed** are ranked: the exact complement of t
 
 ---
 
+## The money loop ✅
+
+Every other figure in this build is a projection. `card_disposals` records the one that is not — the
+money that actually arrived — and `analytics/realised` scores the projections against it.
+
+The gap mattered: `prediction_results` has scored *grade* predictions since Phase 8, so the app
+could report that it called a PSA 9 correctly while having no idea whether the submission made
+money. In a build whose first principle is realisable profit rather than theoretical value, that was
+the wrong half to be missing.
+
+- **A price and a date is the whole of the common case.** Fees, postage and packaging come from the
+  selling profile, so recording a sale is not a form of nine boxes.
+- **A payout you type beats a payout we compute**, and `net_is_user_entered` keeps the two apart. A
+  statement is a fact; a fee model is not.
+- **Null grading cost means unrecorded, never free.** A sale missing a cost is counted in the
+  proceeds and left out of the profit, with the reason naming what is absent — a total that silently
+  dropped a cost would be wrong in the flattering direction.
+- **Scored against the day, not against today.** `price_snapshots` has been accruing since Phase 3,
+  so "what was it worth when you sold it" is answerable from history rather than from a price that
+  has moved since for unrelated reasons.
+- **`grading_gain` answers "was grading worth it"** with two figures that both happened: what the
+  slab netted, less what the same card was worth raw that day, less what grading cost.
+- **A card sells once.** A second sale is a `409`, because two records would double the profit.
+
+**Learned the hard way, by driving it.** The market comparison measured *net proceeds* against a
+*gross* snapshot, so every sale read about 12% under the market — that was the fee load, not
+selling performance, and as a signal it was worthless. Both sides are gross now. The UI copy had
+inherited the same error and said "you netted 0% above it" about a number that is a sale price.
+
+---
+
 ## What is left
 
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,
 not an engine — and it will always be a suggestion the user confirms, never applied silently.
 
-**The money loop does not close.** A card can be marked sold, and the selling queue prices it, but
-there is nowhere to record what it actually fetched. `submission_returns` scores parcels by valuing
-the slabs at current market rather than at realised proceeds, so the app learns whether its *grade*
-predictions were right and never whether its *profit* predictions were.
+`submission_returns` still values returned slabs at current market rather than at realised proceeds.
+Now that disposals exist it should prefer a recorded sale where there is one, and say which it used.
 
 A PriceCharting CSV import (their Legendary tier ships the whole price guide as a file) would beat
 searching card by card for a large collection.
