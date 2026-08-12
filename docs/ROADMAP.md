@@ -622,16 +622,43 @@ and "EVS" typed by hand were two identities for one card.
 
 ---
 
+## What to assess first ✅
+
+Importing four hundred cards takes a second; assessing four hundred does not, and the decision
+engine cannot help choose — it needs an assessment before it says anything at all. So the ranking
+comes from the one thing already known about every imported card: what the market pays for it raw
+against what it pays for the same card in a slab.
+
+`analytics.assessment_queue` computes a **ceiling**, and everything about the design follows from
+it being a bound rather than a forecast. Take the best-netting grade with sales behind it, subtract
+what the card already nets raw and what grading would cost, and that is the most grading could
+possibly add. A real assessment can only bring it down — which is what makes the negative half
+useful: *a card whose best case already loses money cannot be worth grading in any condition*, so it
+is settled without ever being looked at. On a real collection that is most of it.
+
+- **The bar is the user's own.** `minimum_absolute_profit` decides whether a ceiling is worth five
+  minutes, so triage and the decision engine cannot drift into two definitions of "worth it".
+- **A bound is only a bound over what is priced.** If the best grade with sales behind it is a 9, a
+  10 might pay well and a negative ceiling proves nothing. Those are `unknown`, never `skip` — the
+  single most important refusal here, since the alternative throws away a good card on the strength
+  of a price nobody ever looked up.
+- **Missing pieces are named, and they are different work.** No graded sales is a data problem
+  solved by syncing a source; no priced tier is configuration solved in Settings. PSA ships with no
+  fees entered, so it would otherwise withhold a verdict on every card it could have priced.
+- **Ceilings are computed within one company**, reusing `_best_case_per_company` — the Phase 4
+  lesson about pairing one grader's fee with another's slab price still holds.
+- **Nothing is re-derived.** Every figure comes from the economics engine that already produced it,
+  which is this module's standing rule.
+
+Only cards **priced but not yet assessed** are ranked: the exact complement of the population
+`/collection/decisions` analyses, so no card is ever in both lists asking for work already done.
+
+---
+
 ## What is left
 
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,
 not an engine — and it will always be a suggestion the user confirms, never applied silently.
-
-**Condition assessment is now the bottleneck.** Cards import in seconds and each still needs a
-structured assessment before the engine will decide anything, which is right for a card you are
-about to spend £25 grading and wrong as a way to triage four hundred. What is missing is a way to
-rank an imported collection by what the *market* says — raw value and graded premium need no
-condition at all — so the assessments go where they pay.
 
 **The money loop does not close.** A card can be marked sold, and the selling queue prices it, but
 there is nowhere to record what it actually fetched. `submission_returns` scores parcels by valuing

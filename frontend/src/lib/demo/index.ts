@@ -1435,6 +1435,29 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
       () => rankOpportunities(collectionDecisions(Number(params.get('batch_size') ?? 1) || 1)),
     ],
     [method === 'GET' && pathname === '/analytics/selling-queue', () => sellingQueue()],
+    [
+      method === 'GET' && pathname === '/analytics/assessment-queue',
+      // Every demo card ships assessed, which is exactly the population this
+      // excludes. An empty queue with the real reason beats a fabricated one.
+      () => ({
+        status: 'insufficient_data',
+        reason:
+          'Every card in the demo collection is already assessed, so there is nothing waiting. ' +
+          'In the real app this ranks an imported collection by the most grading could add, so ' +
+          'the assessments go where they pay.',
+        currency: currency(),
+        analysed: 0,
+        total_cards: store.cards.length,
+        unpriced: 0,
+        worth_assessing: 0,
+        ruled_out: 0,
+        unknown: 0,
+        truncated: false,
+        total_ceiling: null,
+        items: [],
+        notes: [],
+      }),
+    ],
     [method === 'GET' && pathname === '/analytics/submission-returns', () => submissionReturns()],
     [method === 'GET' && pathname === '/analytics/filters', () => FILTERS],
     [

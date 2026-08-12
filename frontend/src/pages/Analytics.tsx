@@ -6,12 +6,14 @@ import {
   Coins,
   Filter as FilterIcon,
   PackageCheck,
+  ScanEye,
   Sparkles,
   Tag,
   TrendingDown,
 } from 'lucide-react'
 import { api, keys } from '@/lib/api'
 import type {
+  AssessmentCandidate,
   FilterResult,
   Opportunity,
   RankedOpportunities,
@@ -55,6 +57,7 @@ export function Analytics() {
         <Tabs defaultValue="opportunities" className="space-y-6">
           <TabsList>
             <TabsTrigger value="opportunities">What to grade</TabsTrigger>
+            <TabsTrigger value="assess">What to assess</TabsTrigger>
             <TabsTrigger value="selling">What to sell</TabsTrigger>
             <TabsTrigger value="returns">What came back</TabsTrigger>
             <TabsTrigger value="filters">Cuts</TabsTrigger>
@@ -63,6 +66,9 @@ export function Analytics() {
 
           <TabsContent value="opportunities">
             <OpportunitiesTab />
+          </TabsContent>
+          <TabsContent value="assess">
+            <AssessTab />
           </TabsContent>
           <TabsContent value="selling">
             <SellingTab />
@@ -79,6 +85,163 @@ export function Analytics() {
         </Tabs>
       </div>
     </>
+  )
+}
+
+/* --- What to assess ------------------------------------------------------- */
+
+const VERDICT_TONES: Record<string, 'positive' | 'neutral' | 'caution'> = {
+  assess: 'positive',
+  skip: 'neutral',
+  unknown: 'caution',
+}
+
+/**
+ * Which unassessed cards are worth five minutes.
+ *
+ * Importing four hundred cards takes a second; assessing four hundred does not,
+ * and the decision engine cannot help choose — it needs an assessment before it
+ * says anything at all. So this ranks on the one thing already known about every
+ * card: what the market pays for it raw against what it pays for the same card
+ * in a slab.
+ *
+ * The number is a **ceiling**, and the panel works hard not to let it read as a
+ * forecast. It is the most grading could add if the card came back at the
+ * best-priced grade — an upper bound a real assessment can only lower. Its
+ * value is in the other direction: a card whose best case still loses money
+ * cannot be worth grading in any condition, so it is settled without ever being
+ * looked at.
+ */
+function AssessTab() {
+  const [batch, setBatch] = useState(BATCH)
+  const queue = useQuery({
+    queryKey: keys.assessmentQueue(batch),
+    queryFn: () => api.assessmentQueue(batch),
+  })
+
+  const worth = queue.data?.items.filter((item) => item.verdict === 'assess') ?? []
+  const settled = queue.data?.items.filter((item) => item.verdict !== 'assess') ?? []
+
+  return (
+    <Panel>
+      <PanelHeader>
+        <div className="min-w-0">
+          <PanelTitle>Worth a proper look, best first</PanelTitle>
+          <PanelDescription>
+            {queue.data
+              ? `${formatNumber(queue.data.worth_assessing)} of ${formatNumber(queue.data.analysed)} unassessed card(s) could clear your bar. ${formatNumber(queue.data.ruled_out)} cannot, whatever condition they are in.`
+              : 'Ranked by the most grading could possibly add, so the assessments go where they pay.'}
+          </PanelDescription>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Shipping belongs to the parcel, so a ceiling costed at one card is
+              the honest worst case and a fuller batch raises every one of them. */}
+          <div className="flex items-center gap-1">
+            {[1, 20, 50].map((size) => (
+              <Button
+                key={size}
+                size="sm"
+                variant={batch === size ? 'primary' : 'secondary'}
+                onClick={() => setBatch(size)}
+              >
+                {size === 1 ? 'Alone' : `Batch of ${size}`}
+              </Button>
+            ))}
+          </div>
+          {queue.data ? <StatusBadge status={queue.data.status} /> : null}
+        </div>
+      </PanelHeader>
+
+      <PanelBody className="space-y-3">
+        {queue.isError ? <ErrorState error={queue.error} /> : null}
+        {queue.isLoading ? <RowSkeletons /> : null}
+
+        {queue.data && !queue.data.items.length ? (
+          <EmptyState
+            icon={<ScanEye className="size-8" />}
+            title="Nothing waiting to be assessed"
+            description={
+              queue.data.reason ??
+              'Every priced card has been assessed. Import more, or sync a source so unpriced cards can be ranked.'
+            }
+          />
+        ) : null}
+
+        {worth.length ? (
+          <div className="space-y-1.5">
+            {worth.map((row) => (
+              <AssessRow key={row.card_id} row={row} currency={queue.data!.currency} />
+            ))}
+          </div>
+        ) : null}
+
+        {settled.length ? (
+          <details className="rounded-lg border border-line">
+            <summary className="cursor-pointer px-3 py-2 text-xs text-ink-muted">
+              {formatNumber(settled.length)} card(s) you can leave alone — and why
+            </summary>
+            <div className="space-y-1.5 border-t border-line p-3">
+              {settled.map((row) => (
+                <AssessRow key={row.card_id} row={row} currency={queue.data!.currency} />
+              ))}
+            </div>
+          </details>
+        ) : null}
+
+        {queue.data?.items.length ? (
+          <p className="text-[0.7rem] leading-relaxed text-ink-faint">
+            These are ceilings, not forecasts: the most grading could add if the card came back at
+            the best-priced grade. A real assessment can only bring the number down — which is why
+            a card that fails here is settled, and one that passes still has to be looked at.
+          </p>
+        ) : null}
+
+        {queue.data?.notes.map((note) => (
+          <p key={note} className="text-[0.7rem] leading-relaxed text-ink-faint">
+            {note}
+          </p>
+        ))}
+      </PanelBody>
+    </Panel>
+  )
+}
+
+function AssessRow({ row, currency }: { row: AssessmentCandidate; currency: string }) {
+  return (
+    <Link
+      to={`/cards/${row.card_id}`}
+      className="block rounded-lg border border-line px-3 py-2 transition-colors hover:border-brand/50"
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="min-w-0 flex-1 truncate text-sm text-ink">{row.name}</span>
+        {row.best_grade_label ? (
+          <span className="text-[0.7rem] text-ink-faint">
+            best priced: {row.best_grade_label}
+            {row.ceiling_is_complete ? '' : ' (not the top grade)'}
+          </span>
+        ) : null}
+        {row.ceiling !== null ? (
+          <span
+            className={cn(
+              'tabular text-sm',
+              row.verdict === 'assess' ? 'text-positive' : 'text-ink-faint',
+            )}
+          >
+            {row.ceiling > 0 ? '+' : ''}
+            {formatMoney(row.ceiling, currency)}
+          </span>
+        ) : null}
+        {/* "no data" would be wrong for a card that has plenty — just none
+            above the grade that was priced. Both unknowns are waiting on the
+            same thing, and naming it points at the fix. */}
+        <Badge tone={VERDICT_TONES[row.verdict] ?? 'neutral'}>
+          {row.verdict === 'assess' ? 'assess' : row.verdict === 'skip' ? 'settled' : 'needs prices'}
+        </Badge>
+      </div>
+      {row.reason ? (
+        <p className="pt-0.5 text-[0.7rem] leading-relaxed text-ink-faint">{row.reason}</p>
+      ) : null}
+    </Link>
   )
 }
 
