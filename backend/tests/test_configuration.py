@@ -313,3 +313,48 @@ def test_an_exported_variable_beats_dotenv(tmp_path, monkeypatch):
 
     assert config.load_env_files() == []
     assert os.environ["SLABSTACK_TEST_PROVIDER_KEY"] == "set-on-the-command-line"
+
+
+def test_a_dotenv_that_is_still_commented_out_is_reported_as_empty(tmp_path, monkeypatch):
+    """The single likeliest mistake: copy .env.example, fill in, forget the #.
+
+    The file is present and looks right, so every error message downstream —
+    "needs SLABSTACK_EBAY_APP_ID in the environment" — reads as a lie to
+    somebody staring at the line where they set it.
+    """
+    from app import config
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("# SLABSTACK_TEST_PROVIDER_KEY=filled-in-but-still-commented\n")
+    monkeypatch.setattr(config, "ENV_FILES", (env_file,))
+
+    entry = config.env_file_report()[0]
+    assert entry["exists"] is True
+    assert entry["keys"] == [], "present, and sets nothing"
+    assert entry["bom"] is False
+
+
+def test_a_byte_order_mark_is_reported_rather_than_left_invisible(tmp_path, monkeypatch):
+    """Some editors add one silently; it fuses onto the first variable name."""
+    from app import config
+
+    env_file = tmp_path / ".env"
+    env_file.write_bytes(b"\xef\xbb\xbfSLABSTACK_TEST_PROVIDER_KEY=value\n")
+    monkeypatch.setattr(config, "ENV_FILES", (env_file,))
+
+    entry = config.env_file_report()[0]
+    assert entry["bom"] is True
+    assert "SLABSTACK_TEST_PROVIDER_KEY" not in entry["keys"], "the BOM really does break it"
+
+
+def test_the_report_names_variables_and_never_their_values(tmp_path, monkeypatch):
+    """It is printed to a terminal and pasted into chats. Names only."""
+    from app import config
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("SLABSTACK_TEST_PROVIDER_KEY=super-secret-value\n")
+    monkeypatch.setattr(config, "ENV_FILES", (env_file,))
+
+    entry = config.env_file_report()[0]
+    assert entry["keys"] == ["SLABSTACK_TEST_PROVIDER_KEY"]
+    assert "super-secret-value" not in str(entry)
