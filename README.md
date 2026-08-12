@@ -135,19 +135,31 @@ grade in the title — so one search brings back raw sales *and* PSA 10 sales *a
 the comparison becomes real rather than typed in. It is also the only source here that can measure
 liquidity, which needs actual trades.
 
-1. Create an application at [developer.ebay.com](https://developer.ebay.com). Export the **App ID**
-   as `SLABSTACK_EBAY_APP_ID` and the **Cert ID** as `SLABSTACK_EBAY_CERT_ID`, then restart.
-2. Apply for **Marketplace Insights** — the sold-listings API, which eBay grants per application.
-3. **Settings → Data sources → eBay → Enable**, then **Refresh prices**.
+1. Join the [eBay Developers Program](https://developer.ebay.com) — free, needs an eBay account.
+2. Create a **Production** keyset (not Sandbox — Sandbox serves fabricated data from a different
+   host). eBay makes you subscribe to, or explicitly opt out of, *marketplace account deletion
+   notifications* before a production keyset will work; that gate is what usually stalls people.
+3. From the keyset, export the **App ID** (client id) as `SLABSTACK_EBAY_APP_ID` and the **Cert ID**
+   (client secret) as `SLABSTACK_EBAY_CERT_ID`, then restart. The third value, Dev ID, is for the
+   legacy Trading API and is not used here.
+4. **Settings → Data sources → eBay → Enable**, then **Refresh prices**.
 
 Nothing needs linking: eBay is searched by name, so every card in your collection is eligible
 immediately. If you are not on the UK marketplace, change `marketplace` in the source's config
 (`EBAY_US`, `EBAY_DE`, …) and set the matching exchange rate.
 
-**What it does not do.** Without Marketplace Insights approval, sold queries return 403 — the sync
-says so and still records active listings, so liquidity keeps its denominator. Sold data covers the
-last **90 days**, so a longer trend still accrues forward from snapshots. Asking prices are recorded
-as listings and never as sales. And the grade is read out of the seller's own listing title, so
+> **Read this before you count on sold data.** Sold listings come from **Marketplace Insights**,
+> which eBay documents as a Limited Release that is *not open to new users*, granted case by case
+> to selected partners. Assume you will not be approved. What a normal production keyset gives you
+> is the **Browse** API — *active* listings only, which are asking prices.
+>
+> That still earns its place: active listings are the denominator of the sold-to-active ratio, and
+> they are recorded as listings and never as sales. But without Insights, eBay will **not** fill
+> the graded prices, and the grade-or-sell decision still needs those from somewhere else. The sync
+> says exactly this when the 403 comes back rather than failing or going quiet.
+
+Other limits, if you do get access: sold data covers the last **90 days**, so a longer trend still
+accrues forward from snapshots; and the grade is read out of the seller's own listing title, so
 check a card's exclusions before trusting a thin sample.
 
 **The GitHub Pages demo cannot do any of this.** Pages serves static files, so there is no server to

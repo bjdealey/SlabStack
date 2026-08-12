@@ -410,9 +410,10 @@ DATA_SOURCES: tuple[dict, ...] = (
             "the grading decision, because slabs sell on eBay with the grade in the title. "
             "Also the only one that can measure liquidity, which needs real trades. "
             "Needs a developer application for SLABSTACK_EBAY_APP_ID and "
-            "SLABSTACK_EBAY_CERT_ID; sold data additionally needs Marketplace Insights "
-            "approval, without which active listings still work. Official API under its "
-            "terms, never scraped."
+            "SLABSTACK_EBAY_CERT_ID. Sold data needs Marketplace Insights, which eBay "
+            "documents as a limited release not open to new users — expect active listings "
+            "only, which feed liquidity but carry no sold or graded prices. Official API "
+            "under its terms, never scraped."
         ),
     },
     {

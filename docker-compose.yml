@@ -28,9 +28,17 @@ services:
       SLABSTACK_DATA_DIR: /data
       SLABSTACK_STATIC_DIR: /app/static
       # Market-data provider keys. Read from the environment, never stored in
-      # the database. The Pokémon TCG API needs no key — it answers
-      # anonymously, and one only raises the rate limit.
+      # the database. A container sees nothing the compose file does not pass
+      # in, so every variable a provider reads has to be listed here — one that
+      # is missing looks exactly like a key you set wrongly.
+      #
+      # The Pokémon TCG API needs no key: it answers anonymously, and one only
+      # raises the rate limit.
       SLABSTACK_POKEMONTCG_API_KEY: ${SLABSTACK_POKEMONTCG_API_KEY:-}
+      # eBay needs both halves of the pair — the App ID is the client id and
+      # the Cert ID is the client secret.
+      SLABSTACK_EBAY_APP_ID: ${SLABSTACK_EBAY_APP_ID:-}
+      SLABSTACK_EBAY_CERT_ID: ${SLABSTACK_EBAY_CERT_ID:-}
 
     healthcheck:
       test:

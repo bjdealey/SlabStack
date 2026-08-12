@@ -378,10 +378,25 @@ and until now the graded half of it had to be typed in by hand.
   the market, and counting the page would understate supply — which flatters liquidity, which
   flatters the decision to grade.
 
-**What it cannot do.** Marketplace Insights is granted per application, so sold data 403s until
-eBay approves it — reported as `CapabilityDeniedError`, which is deliberately *not* a failure: the
-run notes it and carries on with active listings. Sold data covers 90 days, so a longer trend
-still accrues forward from snapshots. And asking prices are never written as sales.
+**What it cannot do, and this turned out to be bigger than expected.** Sold listings come from
+Marketplace Insights, which eBay documents as a **Limited Release, not open to new users**, granted
+case by case to selected partners. The realistic assumption is that a normal developer account will
+not get it. What a production keyset does give is the Browse API — *active* listings, which are
+asking prices.
+
+So for most users this source arrives as **half of itself**: the sold-to-active denominator, and no
+sold prices. That is a real contribution to liquidity and nothing else, and it means the graded
+prices the decision needs still have to come from somewhere. It is reported as
+`CapabilityDeniedError` — deliberately *not* a failure, because the source is healthy and the run
+carries on with what it can do.
+
+That reframes what to build next. **PriceCharting** returns PSA 10 / PSA 9 / BGS / CGC prices as
+named fields — no title parsing, no 90-day window, and no approval committee, just a paid key. For
+the specific blocker this project cares about, a lesser API you can actually get beats a better one
+you cannot.
+
+Other limits, where access does exist: sold data covers 90 days, so a longer trend still accrues
+forward from snapshots; and asking prices are never written as sales.
 
 **Learned the hard way, twice, and both by driving the UI.**
 
