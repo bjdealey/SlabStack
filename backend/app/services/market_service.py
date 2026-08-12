@@ -699,6 +699,46 @@ def prices_for(db: Session, catalog_key: str) -> list[MarketPrice]:
     return sorted(resolved.values(), key=lambda row: (row.grade_label != "raw", row.grade_label))
 
 
+def snapshots_for(db: Session, catalog_key: str, *, since: date) -> list[PriceSnapshot]:
+    """History for one card: **one point per grade per day**, best evidence first.
+
+    ``price_snapshots`` is unique per ``(catalog_key, grade_label, date, source)``
+    so a day can hold several rows for one grade — your own valuation and a
+    provider's index, written by different code paths on the same afternoon.
+
+    Ungrouped, a chart draws every one of them and produces a vertical spike on
+    that date: a price movement that never happened, made of two sources
+    disagreeing. So the same precedence prices follow applies here — your own
+    sales win, then the larger sample — and what is plotted is one line of best
+    evidence rather than every row that exists.
+    """
+    rows = db.scalars(
+        select(PriceSnapshot)
+        .where(
+            PriceSnapshot.catalog_key == catalog_key,
+            PriceSnapshot.snapshot_date >= since,
+        )
+        .order_by(PriceSnapshot.grade_label, PriceSnapshot.snapshot_date)
+    )
+
+    best: dict[tuple[str, date], PriceSnapshot] = {}
+    for row in rows:
+        slot = (row.grade_label, row.snapshot_date)
+        held = best.get(slot)
+        if held is None or _snapshot_outranks(row, held):
+            best[slot] = row
+    return sorted(best.values(), key=lambda row: (row.grade_label, row.snapshot_date))
+
+
+def _snapshot_outranks(candidate: PriceSnapshot, incumbent: PriceSnapshot) -> bool:
+    """Same rule as prices, minus the timestamp a snapshot does not carry."""
+    candidate_own = candidate.source_id is None and candidate.sample_size > 0
+    incumbent_own = incumbent.source_id is None and incumbent.sample_size > 0
+    if candidate_own != incumbent_own:
+        return candidate_own
+    return candidate.sample_size > incumbent.sample_size
+
+
 def _outranks(candidate: MarketPrice, incumbent: MarketPrice) -> bool:
     """Whether ``candidate`` is the better evidence of the two.
 

@@ -10,6 +10,7 @@ import { CardForm } from '@/components/CardForm'
 import { ConditionForm } from '@/components/ConditionForm'
 import { ImageUploader } from '@/components/ImageUploader'
 import { GradeProbabilities } from '@/components/GradeProbabilities'
+import { MarketHistory } from '@/components/MarketHistory'
 import { MarketPanel } from '@/components/MarketPanel'
 import { GradingRoutes } from '@/components/GradingRoutes'
 import { Recommendation } from '@/components/Recommendation'
@@ -258,6 +259,8 @@ export function CardDetail() {
               )}
 
               <MarketPanel cardId={cardId} evaluation={evaluated} card={card.data} />
+
+              <MarketHistory cardId={cardId} currency={evaluated.currency} />
 
               <GradingRoutes
                 cardId={cardId}

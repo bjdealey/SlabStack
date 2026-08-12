@@ -493,6 +493,32 @@ now* — precisely what recency evidences and an annual total cannot.
 
 ---
 
+## The price history chart ✅
+
+`price_snapshots`, `GET /cards/{id}/market/history` and `SnapshotSeries` had all existed and been
+exercised since Phase 3 with nothing drawing them. `MarketHistory.tsx` draws them, and most of the
+work was in what it refuses to draw.
+
+- **One point per grade per day.** Snapshots are unique per *source*, so your own valuation and a
+  provider's index can both land on one afternoon — and plotted ungrouped they produce a vertical
+  spike that reads as a price movement and is two sources disagreeing. `snapshots_for` resolves
+  them with the precedence prices already use: your own sales win, then the larger sample.
+- **Below two days, no chart.** A single dot with a line through nothing is exactly the false
+  precision the rest of the application refuses, so it says how many days it has instead.
+- **Gaps stay gaps.** `connectNulls={false}`, and a missing day is absent rather than zero — a zero
+  would be plotted as a price of nothing, which is a far worse lie than a hole in a line.
+- **A zero baseline.** It makes a stable card look flat, which is the point: rescaling to the data
+  would turn a 3% drift over 90 days into a dramatic rally.
+
+**Learned the hard way, again by driving the UI.** The raw line plunged at its right edge and looked
+like a crash. It was the resolver correctly switching that day's point from the provider's index to
+the user's own valuation — a change of *basis* rendered as a change of *price*, which is the same
+class of error as the pooled-grade trend in Phase 3. Points now name what they rest on in the
+tooltip, and a line that mixes the two says so above the chart rather than leaving it to be
+discovered by hovering the one point that explains it.
+
+---
+
 ## What is left
 
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,

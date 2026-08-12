@@ -32,7 +32,6 @@ from app.models import (
     MarketListing,
     MarketPrice,
     MarketSale,
-    PriceSnapshot,
 )
 from app.money import to_major, to_minor
 from app.schemas.common import Acknowledgement
@@ -515,14 +514,10 @@ def card_history(
     if not card.catalog_key:
         return []
     cutoff = date.today() - timedelta(days=days)
-    rows = db.scalars(
-        select(PriceSnapshot)
-        .where(
-            PriceSnapshot.catalog_key == card.catalog_key,
-            PriceSnapshot.snapshot_date >= cutoff,
-        )
-        .order_by(PriceSnapshot.grade_label, PriceSnapshot.snapshot_date)
-    )
+    # One point per grade per day. A day can hold a row from your own valuation
+    # and one from a provider, and plotting both draws a price movement that
+    # never happened.
+    rows = market_service.snapshots_for(db, card.catalog_key, since=cutoff)
 
     series: dict[str, SnapshotSeries] = {}
     for row in rows:
