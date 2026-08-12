@@ -134,6 +134,22 @@ class PriceChartingProvider(MarketDataProvider):
     def price_currency(self) -> str:
         return PRICE_CURRENCY
 
+    def available_grade_labels(self) -> list[str]:
+        """Raw always; the graded ladder only once the mapping is confirmed.
+
+        This is what the sync iterates over, so an unconfirmed mapping does not
+        merely refuse to answer for a grade — it never gets asked, and no
+        half-written graded row can appear.
+        """
+        labels = ["raw"]
+        if self.mapping_confirmed:
+            labels.extend(
+                str(label)
+                for label in self.grade_fields.values()
+                if str(label).strip().lower() != "raw"
+            )
+        return list(dict.fromkeys(labels))
+
     # --- Search --------------------------------------------------------------
 
     def search_card(self, query: CardQuery) -> list[CardMatch]:
