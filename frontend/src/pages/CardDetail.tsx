@@ -5,6 +5,7 @@ import { ArrowLeft, ClipboardCheck, Pencil, Scissors, Trash2 } from 'lucide-reac
 import { toast } from 'sonner'
 import { api, ApiError, keys } from '@/lib/api'
 import type { CardWrite, ConditionWrite } from '@/lib/types'
+import { ActiveListings } from '@/components/ActiveListings'
 import { PageHeader } from '@/components/AppShell'
 import { CardForm } from '@/components/CardForm'
 import { ConditionForm } from '@/components/ConditionForm'
@@ -270,7 +271,19 @@ export function CardDetail() {
               />
 
               {/* Evidence last: the decisions above are what the page is for,
-                  and a forty-row sales list between them buries the routes. */}
+                  and a forty-row sales list between them buries the routes.
+                  Asks before sales, because asks are the weaker evidence and
+                  the stronger evidence should be the last thing read. */}
+              {/* The block goes in whatever its status says. A `partial`
+                  market still holds real prices — gating on `ok` threw away the
+                  ask-versus-realised comparison on every card that had one. */}
+              <ActiveListings
+                cardId={cardId}
+                currency={evaluated.currency}
+                market={evaluated.market}
+                activeListings={evaluated.liquidity.active_listings}
+              />
+
               <SalesList cardId={cardId} currency={evaluated.currency} onChange={refresh} />
             </>
           ) : null}

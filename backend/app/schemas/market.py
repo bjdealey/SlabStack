@@ -149,32 +149,64 @@ class SaleOut(ApiModel):
 
 
 class ListingOut(ApiModel):
+    """One thing somebody is currently asking for — never something they got.
+
+    Kept deliberately distinct from ``SaleOut``. A sale is evidence; an asking
+    price is a hope, and a column of hopes beside a column of sales is how a
+    collection talks itself into a number nobody has ever paid (spec §1).
+    """
+
     id: str
     catalog_key: str
     grade_label: str
+    grade: float | None = None
     platform: str | None = None
     price: float
     currency: str
+    shipping: float | None = Field(
+        default=None,
+        description="Postage, when the source states it. Null means unstated, not free — a "
+        "cheap card with expensive postage is not a cheap card.",
+    )
+    #: Only where postage is known, so this is never a price with a guess in it.
+    total_ask: float | None = None
     listing_title: str | None = None
     source_url: str | None = None
     is_auction: bool = False
     is_active: bool = True
     listed_at: date | None = None
+    ends_at: datetime | None = Field(
+        default=None, description="When an auction closes. Absent for fixed-price listings."
+    )
+    seen_at: datetime = Field(
+        description="When this was last confirmed present. Listings end, and a fetch from three "
+        "weeks ago describes a shop window that has since changed.",
+    )
 
     @classmethod
     def from_model(cls, row: MarketListing) -> ListingOut:
+        shipping = to_major(row.shipping_minor)
         return cls(
             id=row.id,
             catalog_key=row.catalog_key,
             grade_label=row.grade_label,
+            grade=row.grade,
             platform=row.platform,
             price=to_major(row.price_minor) or 0.0,
             currency=row.currency,
+            shipping=shipping,
+            total_ask=(
+                to_major(row.price_minor + row.shipping_minor)
+                if row.shipping_minor is not None
+                else None
+            ),
             listing_title=row.listing_title,
             source_url=row.source_url,
             is_auction=row.is_auction,
             is_active=row.is_active,
             listed_at=row.listed_at,
+            ends_at=row.ends_at,
+            seen_at=row.seen_at,
         )
 
 

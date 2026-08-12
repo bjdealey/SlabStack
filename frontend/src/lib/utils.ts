@@ -67,6 +67,13 @@ export function formatDate(value: string | null | undefined): string {
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+/**
+ * How long ago something happened. Past only.
+ *
+ * A future timestamp gives a negative difference and falls into "today", so
+ * anything that can be ahead of now — an auction closing, a submission due —
+ * wants `timeUntil` instead.
+ */
 export function relativeTime(value: string | null | undefined): string {
   if (!value) return '—'
   const date = new Date(value)
@@ -76,6 +83,28 @@ export function relativeTime(value: string | null | undefined): string {
   if (days < 30) return `${days} days ago`
   if (days < 365) return `${Math.floor(days / 30)} months ago`
   return `${Math.floor(days / 365)} years ago`
+}
+
+/**
+ * How long is left. The mirror of `relativeTime`, and needed because that one
+ * reports every future moment as "today" — which made an auction closing in
+ * three weeks look as urgent as one closing in an hour.
+ *
+ * Hours matter here in a way they do not for a sale date: whether you can still
+ * bid is the whole question.
+ */
+export function timeUntil(value: string | null | undefined): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  const ms = date.getTime() - Date.now()
+  if (ms <= 0) return 'ended'
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 60) return `in ${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `in ${hours}h`
+  const days = Math.round(hours / 24)
+  return days === 1 ? 'in a day' : `in ${days} days`
 }
 
 /** "reverse_holo" -> "Reverse holo". Used for enum values coming from the API. */

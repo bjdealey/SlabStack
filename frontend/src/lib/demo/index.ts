@@ -539,7 +539,17 @@ function marketParams() {
 }
 
 function summaryFor(card: Card): MarketSummary {
-  return market.summarise(card.catalog_key, store.sales, store.prices, marketParams(), currency())
+  return market.summarise(
+    card.catalog_key,
+    store.sales,
+    store.prices,
+    marketParams(),
+    currency(),
+    // The seed has carried a count of unsold listings per card since Phase 3
+    // and nothing ever read it, so the demo's sold-to-active ratio was blank
+    // where the server's is not — supply is half of what liquidity means.
+    (card.catalog_key && store.listings.get(card.catalog_key)) || null,
+  )
 }
 
 function repriceKey(catalogKey: string | null): MarketPrice[] {
@@ -1568,6 +1578,10 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
     ],
     [
       method === 'GET' && at(0) === 'cards' && at(2) === 'market' && at(3) === 'listings',
+      // The seed carries a *count* of active listings, which liquidity uses,
+      // and no individual listings — the same shape a source that publishes
+      // only a total gives you. The panel says which of the two it has rather
+      // than reporting an empty list as "nothing is on sale".
       () => [],
     ],
     [

@@ -974,6 +974,36 @@ export interface MarketSale {
   imported_at: string | null
 }
 
+/**
+ * One thing somebody is currently asking for — never something they got.
+ *
+ * Deliberately a different type from `MarketSale`. A sale is evidence; an
+ * asking price is a hope, and an unsold listing is evidence that nobody paid
+ * it. Nothing here feeds a valuation.
+ */
+export interface Listing {
+  id: string
+  catalog_key: string
+  grade_label: string
+  grade: number | null
+  platform: string | null
+  price: number
+  currency: string
+  /** Null means the source did not state postage, not that it is free. */
+  shipping: number | null
+  /** Only where postage is known, so this is never a price with a guess in it. */
+  total_ask: number | null
+  listing_title: string | null
+  source_url: string | null
+  is_auction: boolean
+  is_active: boolean
+  listed_at: string | null
+  /** When an auction closes. Absent for fixed-price listings. */
+  ends_at: string | null
+  /** When this was last confirmed present. Listings end. */
+  seen_at: string
+}
+
 export interface MarketPrice {
   id: string
   catalog_key: string
