@@ -1165,6 +1165,28 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
       }),
     ],
     [
+      method === 'POST' && pathname === '/catalog/link-all',
+      () => ({
+        source_code: params.get('source_code') ?? 'pokemontcg_io',
+        source_name: 'Pokémon TCG API',
+        linked: 0,
+        skipped: 0,
+        ambiguous: 0,
+        failed: 0,
+        dry_run: params.get('dry_run') !== 'false',
+        status: 'error',
+        // The same limitation as the lookup above, and worth saying twice: a
+        // silent zero here would read as "nothing matched", which is a claim
+        // about the collection rather than about the demo.
+        reason:
+          'The demo runs entirely in this browser tab, so there is no catalogue to link to. ' +
+          'Run SlabStack locally and enable a source — this searches once per unlinked card ' +
+          'and links only the ones it has no decision to make about.',
+        cards: [],
+        notes: [],
+      }),
+    ],
+    [
       method === 'POST' && pathname === '/market/refresh',
       () =>
         fail(

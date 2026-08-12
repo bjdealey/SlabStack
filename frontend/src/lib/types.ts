@@ -1374,3 +1374,40 @@ export interface SyncReport {
   sales_excluded: number
   listings_seen: number
 }
+
+/* --- Bulk catalogue linking ---------------------------------------------- */
+
+export interface LinkCandidate {
+  external_id: string
+  name: string
+  set_name: string | null
+  card_number: string | null
+  confidence: number
+}
+
+export interface LinkOutcome {
+  card_id: string
+  name: string
+  /** `linked`, `ambiguous`, `skipped` or `failed`. */
+  status: string
+  reason: string | null
+  external_id: string | null
+  matched_name: string | null
+  confidence: number | null
+  /** What it was choosing between when it declined to choose. */
+  candidates: LinkCandidate[]
+}
+
+export interface LinkReport {
+  source_code: string
+  source_name: string
+  linked: number
+  skipped: number
+  ambiguous: number
+  failed: number
+  dry_run: boolean
+  status: string
+  reason: string | null
+  cards: LinkOutcome[]
+  notes: string[]
+}

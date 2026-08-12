@@ -4,6 +4,7 @@ import { AlertTriangle, CloudDownload, ExternalLink, Info, Wifi, WifiOff } from 
 import { toast } from 'sonner'
 import { api, ApiError, keys } from '@/lib/api'
 import type { CardSyncOutcome, DataSource, SyncReport } from '@/lib/types'
+import { BulkLink } from '@/components/BulkLink'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Panel, PanelBody, PanelDescription, PanelHeader, PanelTitle } from '@/components/ui/panel'
@@ -124,6 +125,8 @@ export function DataSources() {
           ))}
         </PanelBody>
       </Panel>
+
+      <BulkLink sources={sources.data!} />
 
       {report ? <SyncResult reports={report} /> : null}
     </div>

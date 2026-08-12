@@ -33,6 +33,7 @@ import type {
   SellingQueue,
   OptimiserPlan,
   SettingsResponse,
+  LinkReport,
   SnapshotSeries,
   SourceState,
   Submission,
@@ -359,6 +360,10 @@ export const api = {
       `/cards/${cardId}/catalog-link`,
       { method: 'POST', body: JSON.stringify(payload) },
     ),
+  linkAll: (params: { source_code?: string; dry_run?: boolean; relink?: boolean; limit?: number }) =>
+    request<LinkReport>(`/catalog/link-all${query(params as Record<string, string | undefined>)}`, {
+      method: 'POST',
+    }),
   refreshMarket: (cardId?: string) =>
     request<SyncReport[]>(`/market/refresh${query({ card_id: cardId })}`, { method: 'POST' }),
   getSettings: () => request<SettingsResponse>('/settings'),
