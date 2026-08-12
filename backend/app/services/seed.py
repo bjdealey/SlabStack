@@ -300,6 +300,43 @@ SELLING_PROFILES: tuple[dict, ...] = (
 
 # --- Market data sources (all network providers start disabled) --------------
 
+#: Configuration this build shipped, later found to be wrong, and what replaces
+#: it — applied only where the stored value still matches the old one exactly.
+#:
+#: Keyed by source code, each entry ``(superseded_grade_fields, corrections)``.
+SUPERSEDED_CONFIG: dict[str, tuple[tuple[dict, dict], ...]] = {
+    "pricecharting": (
+        (
+            # Shipped in the first PriceCharting release. Checking it against
+            # the published guide showed graded-price and box-only-price are
+            # the generic Grade 9 and Grade 9.5, and turned up four fields the
+            # mapping had missed entirely.
+            {
+                "loose-price": "raw",
+                "graded-price": "PSA 9",
+                "box-only-price": "PSA 9.5",
+                "manual-only-price": "PSA 10",
+                "bgs-10-price": "BGS 10",
+            },
+            {
+                "grade_fields": {
+                    "loose-price": "raw",
+                    "cib-price": "PSA 7",
+                    "new-price": "PSA 8",
+                    "graded-price": "PSA 9",
+                    "box-only-price": "PSA 9.5",
+                    "manual-only-price": "PSA 10",
+                    "bgs-10-price": "BGS 10",
+                    "condition-17-price": "CGC 10",
+                    "condition-18-price": "SGC 10",
+                },
+                "grade_fields_confirmed": True,
+            },
+        ),
+    ),
+}
+
+
 def _adopt_source(existing: DataSource, spec: dict) -> None:
     """Let an already-created source pick up work done since it was created.
 
@@ -324,6 +361,20 @@ def _adopt_source(existing: DataSource, spec: dict) -> None:
         # "no adapter written yet", which is now false.
         existing.notes = spec.get("notes") or existing.notes
         existing.terms_url = spec.get("terms_url") or existing.terms_url
+
+    # A shipped default that turned out to be wrong has to be able to reach a
+    # database that already has it. PriceCharting's mapping went out claiming
+    # PSA 9 and PSA 9.5 for what are actually generic, grader-pooled grades;
+    # leaving that in place would keep mislabelling every graded price on any
+    # install that had already seeded it.
+    #
+    # Only where the stored mapping is *exactly* the superseded one. A mapping
+    # the user has edited is their decision and is never overwritten — which is
+    # the whole reason it lives in config.
+    for superseded, corrected in SUPERSEDED_CONFIG.get(existing.code, ()):
+        config = existing.config or {}
+        if config.get("grade_fields") == superseded:
+            existing.config = {**config, **corrected}
 
     # The one enable that is safe: a source that ships on by default, in a
     # database that predates that default, which the user has never run and so
@@ -387,24 +438,37 @@ DATA_SOURCES: tuple[dict, ...] = (
             # and because nobody has yet checked it against the site.
             "grade_fields": {
                 "loose-price": "raw",
+                # PriceCharting states grades generically below the tens —
+                # "Grade 7", "Grade 9.5" — pooling every grader. Read as PSA,
+                # which is an approximation and is said so in the notes below.
+                "cib-price": "PSA 7",
+                "new-price": "PSA 8",
                 "graded-price": "PSA 9",
                 "box-only-price": "PSA 9.5",
+                # Company-specific, and exact.
                 "manual-only-price": "PSA 10",
                 "bgs-10-price": "BGS 10",
+                "condition-17-price": "CGC 10",
+                "condition-18-price": "SGC 10",
             },
-            # Until a human has compared the two, only the raw price is written.
-            # A graded price under the wrong grade is silent, plausible, and
-            # inverts the recommendation — worse than no price at all.
+            # Confirmed by matching every field above against PriceCharting's
+            # own published price guide for a real card, by exact price. The
+            # check is worth repeating for yourself if you want to:
             #   make pricecharting-fields CARD="Umbreon VMAX Evolving Skies"
-            "grade_fields_confirmed": False,
+            # Set this false and only the raw price is written, which is what a
+            # source with an unverified mapping should do.
+            "grade_fields_confirmed": True,
         },
         "terms_url": "https://www.pricecharting.com/api-documentation",
         "notes": (
             "Graded prices as named fields — the only source here that fills the slab side of "
             "the grading decision without an approval process. Needs a paid API key. Quotes "
             "USD, so an exchange rate is required. Aggregates, not individual sales, so "
-            "liquidity stays unknown. Check the grade mapping before trusting it: run "
-            "`make pricecharting-fields` and set grade_fields_confirmed."
+            "liquidity stays unknown. "
+            "One approximation, stated rather than hidden: PriceCharting reports the tens "
+            "per company (PSA 10, BGS 10, CGC 10, SGC 10) but grades 7 to 9.5 generically, "
+            "pooled across graders — those four are recorded as PSA. Run "
+            "`make pricecharting-fields` to check the mapping against the site yourself."
         ),
     },
     {
