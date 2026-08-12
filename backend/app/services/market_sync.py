@@ -30,11 +30,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.enums import Confidence
-from app.models import Card, DataSource, MarketListing, MarketPrice, PriceSnapshot
+from app.models import (
+    Card,
+    DataSource,
+    GradingCompany,
+    MarketListing,
+    MarketPrice,
+    PriceSnapshot,
+)
 from app.services import market_service, sales_import, settings_service
 from app.services.identity import grade_label as build_grade_label
 from app.services.market_data.base import CardQuery, MarketDataProvider, MarketKey
@@ -268,16 +275,60 @@ def _sync_price(
     rates: dict,
     outcome: CardSyncOutcome,
 ) -> CardSyncOutcome:
-    """One aggregate number from a source that keeps an index."""
+    """Aggregate prices from a source that keeps an index — one row per grade.
+
+    A grade at a time, because a source that prices slabs is the whole reason
+    the grading question is answerable, and asking only for ``raw`` would leave
+    it delivering exactly the half the application already had.
+    """
     external_id = (card.external_ids or {}).get(source.code)
 
     if not external_id:
         outcome.reason = "Not linked to this source yet."
         return outcome
 
+    written: list[str] = []
+    for label in provider.available_grade_labels():
+        if _sync_one_grade(
+            db,
+            provider,
+            card,
+            label=label,
+            external_id=external_id,
+            source=source,
+            currency=currency,
+            rates=rates,
+            outcome=outcome,
+        ):
+            written.append(label)
+        if outcome.status == "failed":
+            # The source is unreachable or refusing; the remaining grades would
+            # fail identically and only burn somebody's rate limit.
+            return outcome
+
+    if written:
+        outcome.status = "updated"
+        outcome.grades = written
+    elif not outcome.reason:
+        outcome.reason = f"{source.name} has no price for this card at any grade."
+    return outcome
+
+
+def _sync_one_grade(
+    db: Session,
+    provider: MarketDataProvider,
+    card: Card,
+    *,
+    label: str,
+    external_id: str,
+    source: DataSource,
+    currency: str,
+    rates: dict,
+    outcome: CardSyncOutcome,
+) -> bool:
     key = MarketKey(
         catalog_key=card.catalog_key,
-        grade_label="raw",
+        grade_label=label,
         currency=currency,
         external_id=external_id,
         variant=card.variant,
@@ -288,63 +339,88 @@ def _sync_price(
     except ProviderRequestError as exc:
         outcome.status = "failed"
         outcome.reason = str(exc)
-        return outcome
+        return False
     except Exception as exc:  # One bad adapter must not abort the whole run.
         outcome.status = "failed"
         outcome.reason = f"{source.name} adapter raised {type(exc).__name__}: {exc}"
-        return outcome
+        return False
 
     if point is None:
-        outcome.reason = f"{source.name} has no current price for this card."
-        return outcome
-
-    outcome.source_value = round(point.value_minor / 100, 2)
-    outcome.source_currency = point.currency
+        # Normal, not an error: most cards have some grade with too little
+        # behind it to price. Only worth reporting when *nothing* priced.
+        if label == "raw" and not outcome.reason:
+            outcome.reason = f"{source.name} has no current price for this card."
+        return False
 
     converted, rate = convert_minor(
         point.value_minor, from_currency=point.currency, to_currency=currency, rates=rates
     )
+    if label == "raw":
+        # The headline figures on the report describe the raw card, which is
+        # what every other source reports and what keeps the two comparable.
+        outcome.source_value = round(point.value_minor / 100, 2)
+        outcome.source_currency = point.currency
+
     if converted is None:
         outcome.reason = (
             f"{point.currency} price, but no {point.currency}→{currency} rate is set. Add one in "
             "Settings → Market and run this again — nothing is lost, the price is simply not "
             "written until it can be stated in your currency."
         )
-        return outcome
+        return False
 
-    outcome.status = "updated"
-    outcome.value = round(converted / 100, 2)
-    outcome.currency = currency
-    outcome.fx_rate = rate
+    if label == "raw":
+        outcome.value = round(converted / 100, 2)
+        outcome.currency = currency
+        outcome.fx_rate = rate
+
     _write_price(
-        db, card=card, source=source, point=point, value_minor=converted, currency=currency
+        db,
+        card=card,
+        source=source,
+        point=point,
+        value_minor=converted,
+        currency=currency,
+        label=label,
     )
-    return outcome
+    return True
 
 
 def _write_price(
-    db: Session, *, card: Card, source: DataSource, point, value_minor: int, currency: str
+    db: Session,
+    *,
+    card: Card,
+    source: DataSource,
+    point,
+    value_minor: int,
+    currency: str,
+    label: str = "raw",
 ) -> None:
-    """Upsert this source's own price row, and snapshot it for the trend.
+    """Upsert this source's own price row for one grade, and snapshot it.
 
-    The snapshot matters more than it looks. This source has no price history to
-    import, so the only way a trend ever appears for a provider-priced card is
-    by accruing one a day at a time from here. ``recompute_key`` cannot do it:
-    it walks the grades that have *sales*, and a provider-only card has none.
+    The snapshot matters more than it looks. An index source has no price
+    history to import, so the only way a trend ever appears for a
+    provider-priced card is by accruing one a day at a time from here.
+    ``recompute_key`` cannot do it: it walks the grades that have *sales*, and a
+    provider-priced card has none.
     """
+    grade, company_id = _resolve_grade(db, label)
+
     row = db.scalars(
         select(MarketPrice).where(
             MarketPrice.catalog_key == card.catalog_key,
-            MarketPrice.grade_label == "raw",
+            MarketPrice.grade_label == label,
             MarketPrice.source_id == source.id,
         )
     ).first()
     if row is None:
         row = MarketPrice(
-            catalog_key=card.catalog_key, grade_label="raw", source_id=source.id
+            catalog_key=card.catalog_key, grade_label=label, source_id=source.id
         )
         db.add(row)
 
+    row.grade = grade
+    row.company_id = company_id
     row.currency = currency
     row.median_minor = value_minor
     row.realistic_sale_minor = value_minor
@@ -368,7 +444,7 @@ def _write_price(
     snapshot = db.scalars(
         select(PriceSnapshot).where(
             PriceSnapshot.catalog_key == card.catalog_key,
-            PriceSnapshot.grade_label == "raw",
+            PriceSnapshot.grade_label == label,
             PriceSnapshot.snapshot_date == today,
             PriceSnapshot.source_id == source.id,
         )
@@ -377,7 +453,9 @@ def _write_price(
         db.add(
             PriceSnapshot(
                 catalog_key=card.catalog_key,
-                grade_label="raw",
+                grade_label=label,
+                grade=grade,
+                company_id=company_id,
                 snapshot_date=today,
                 currency=currency,
                 value_minor=value_minor,
@@ -389,6 +467,26 @@ def _write_price(
         # One row per source per day: syncing twice is not two data points.
         snapshot.value_minor = value_minor
         snapshot.currency = currency
+
+
+def _resolve_grade(db: Session, label: str) -> tuple[float | None, str | None]:
+    """Turn "PSA 10" back into the grade and the company row it belongs to.
+
+    Every engine downstream filters graded prices by company — the best route is
+    computed strictly within one grader, because pairing ACE's fee with PSA's
+    slab price describes a route that does not exist. A graded row with no
+    company attached would be invisible to all of it.
+    """
+    if not label or label.strip().lower() == "raw":
+        return None, None
+    parsed = sales_import.parse_grade_from_title(label)
+    if parsed is None:
+        return None, None
+    code, grade = parsed
+    company = db.scalars(
+        select(GradingCompany).where(func.upper(GradingCompany.code) == code.upper())
+    ).first()
+    return grade, (company.id if company else None)
 
 
 # --- Sales-level sources -----------------------------------------------------

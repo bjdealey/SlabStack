@@ -190,3 +190,140 @@ def test_the_raw_fields_are_exposed_unmapped_for_confirmation():
     assert fields["manual-only-price"] == 42_000
     assert fields["box-only-price"] == 36_000
     assert fields["cib-price"] == 24_000, "including fields the mapping ignores"
+
+
+# --- The sync, which is where this source nearly failed silently -------------
+
+
+@pytest.fixture
+def pc_source(db):
+    """PriceCharting, enabled, with a key present for the duration."""
+    import os
+
+    from sqlalchemy import select
+
+    from app.models import DataSource
+
+    os.environ["SLABSTACK_PRICECHARTING_API_KEY"] = "recorded-token"
+    source = db.scalar(select(DataSource).where(DataSource.code == "pricecharting"))
+    source.enabled = True
+    db.commit()
+    yield source
+    os.environ.pop("SLABSTACK_PRICECHARTING_API_KEY", None)
+
+
+def run_sync(db, source, monkeypatch, *, confirmed: bool):
+    from app.services import market_sync
+
+    adapter = provider(confirmed=confirmed)
+    monkeypatch.setattr(market_sync, "load_provider", lambda _source: adapter)
+    return market_sync.sync_source(db, source)
+
+
+def linked_card(client, db, source) -> str:
+    from app.models import Card
+
+    # PriceCharting quotes USD and this app reports GBP, so without a rate every
+    # price is fetched and deliberately not written. Exactly the state a new
+    # install is in, and the first thing to check when nothing appears.
+    client.patch("/api/settings", json={"values": {"fx_rates": {"USD_GBP": 0.79}}})
+
+    card = client.post(
+        "/api/cards",
+        json={"name": "Umbreon VMAX", "set_code": "EVS", "card_number": "215/203"},
+    ).json()
+    row = db.get(Card, card["id"])
+    row.external_ids = {"pricecharting": "6910335"}
+    db.commit()
+    return card["id"]
+
+
+def stored_labels(db, card_id) -> set[str]:
+    from sqlalchemy import select
+
+    from app.models import Card, MarketPrice
+
+    key = db.get(Card, card_id).catalog_key
+    return {
+        row.grade_label
+        for row in db.scalars(select(MarketPrice).where(MarketPrice.catalog_key == key))
+    }
+
+
+def test_the_sync_asks_for_every_grade_not_just_raw(db, client, pc_source, monkeypatch):
+    """The bug this source was shipped with.
+
+    The price sync hardcoded grade_label="raw", which was harmless while no
+    provider had graded prices and made a graded-price source unable to deliver
+    a single one the moment it existed. Everything else was correct — the
+    adapter, the mapping, the key — and nothing appeared.
+    """
+    card_id = linked_card(client, db, pc_source)
+    run_sync(db, pc_source, monkeypatch, confirmed=True)
+
+    assert stored_labels(db, card_id) >= {"raw", "PSA 9", "PSA 9.5", "PSA 10", "BGS 10"}
+
+
+def test_an_unconfirmed_mapping_writes_only_the_raw_price(db, client, pc_source, monkeypatch):
+    card_id = linked_card(client, db, pc_source)
+    run_sync(db, pc_source, monkeypatch, confirmed=False)
+
+    assert stored_labels(db, card_id) == {"raw"}
+
+
+def test_a_graded_row_carries_its_company(db, client, pc_source, monkeypatch):
+    """Every engine downstream costs a route within one grader.
+
+    A PSA 10 price with no company attached is invisible to all of it — the
+    best-case route is computed strictly per company, because pairing ACE's fee
+    with PSA's slab price describes a route that does not exist.
+    """
+    from sqlalchemy import select
+
+    from app.models import Card, GradingCompany, MarketPrice
+
+    card_id = linked_card(client, db, pc_source)
+    run_sync(db, pc_source, monkeypatch, confirmed=True)
+
+    key = db.get(Card, card_id).catalog_key
+    row = db.scalars(
+        select(MarketPrice).where(
+            MarketPrice.catalog_key == key, MarketPrice.grade_label == "PSA 10"
+        )
+    ).first()
+    psa = db.scalars(select(GradingCompany).where(GradingCompany.code == "PSA")).first()
+
+    assert row.grade == 10.0
+    assert row.company_id == psa.id
+
+
+def test_the_report_names_the_grades_it_wrote(db, client, pc_source, monkeypatch):
+    linked_card(client, db, pc_source)
+    report = run_sync(db, pc_source, monkeypatch, confirmed=True)
+
+    assert report.cards[0].status == "updated"
+    assert "PSA 10" in report.cards[0].grades
+
+
+def test_without_an_exchange_rate_nothing_is_written_and_the_run_says_why(
+    db, client, pc_source, monkeypatch
+):
+    """The likeliest reason a correctly configured source appears to do nothing.
+
+    Every step can be right — key set, source enabled, card linked, mapping
+    confirmed — and still no price appears, because PriceCharting quotes USD and
+    this app reports one currency. Guessing a rate would rescale every price
+    silently, so the run fetches, refuses, and explains.
+    """
+    from app.models import Card
+
+    card = client.post(
+        "/api/cards", json={"name": "Umbreon VMAX", "card_number": "215/203"}
+    ).json()
+    db.get(Card, card["id"]).external_ids = {"pricecharting": "6910335"}
+    db.commit()
+
+    report = run_sync(db, pc_source, monkeypatch, confirmed=True)
+
+    assert stored_labels(db, card["id"]) == set(), "fetched, and deliberately not written"
+    assert "USD→GBP rate" in (report.cards[0].reason or "")

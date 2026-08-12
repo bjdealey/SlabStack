@@ -156,6 +156,20 @@ class MarketDataProvider(ABC):
     @abstractmethod
     def capabilities(self) -> ProviderCapabilities: ...
 
+    def available_grade_labels(self) -> list[str]:
+        """Which grades this source can price, raw first.
+
+        Most sources know only the raw card, which is why that is the default.
+        A source that prices slabs says so here and the sync asks it for each
+        one in turn.
+
+        Without this the engine asked every provider for ``raw`` and nothing
+        else — which was harmless while no provider had graded prices, and
+        became the reason a graded-price source could not deliver a single
+        graded price the moment one existed.
+        """
+        return ["raw"]
+
     def search_card(self, query: CardQuery) -> list[CardMatch]:
         raise NotImplementedError(f"{self.code} does not support card search")
 
