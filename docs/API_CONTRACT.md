@@ -1369,6 +1369,19 @@ until the graded outcome has a price to lose against.
 
 **`GET /api/analytics/submission-returns`** — no parameters.
 
+**A sale that happened beats a price that might.** Where a card in the parcel has a recorded
+disposal, its value is what it actually fetched and `value_basis` is `realised`; otherwise it is
+today's price for that grade and the basis is `market`. Before disposals existed every returned slab
+was valued at the current market, which made a parcel's ROI drift with the market long after the
+position was closed.
+
+The grading cost still comes from the **submission line**, not from the sale record's own
+`grading_cost` — this is the parcel's return, and taking both would charge the fee twice.
+
+`realised_count` and `status_note` say which kind of number a return is made of. A parcel scored
+entirely on sales is a result; one scored on current prices is a projection; a mixture is neither,
+and that is the case worth naming.
+
 ```jsonc
 {
   "status": "partial",
@@ -1383,15 +1396,18 @@ until the graded outcome has a price to lose against.
     "total_cost": 24.88, "total_value": 645.20,
     "total_profit": 620.32, "roi_pct": 2493.9,
     "mean_surprise": 0.5,          // positive: the grader was kinder than the model expected
+    "realised_count": 1,           // how many rest on money that actually arrived
     "cards": [{
       "card_id": "…", "name": "Umbreon VMAX 215/203",
       "predicted_grade": 9.5, "actual_grade": 10, "surprise": 0.5,
       "cost": 24.88,
-      "graded_value": 900.00,      // from that grade's own sales, or null
+      "graded_value": 900.00,      // what it sold for, or that grade's price, or null
       "net_if_sold": 645.20, "profit": 620.32,
+      "value_basis": "realised",   // `realised` | `market` | null
+      "sold_on": "2026-08-11",
       "blockers": []
     }],
-    "status_note": null
+    "status_note": "Every card here has sold, so this return is money, not an estimate."
   }]
 }
 ```

@@ -1194,6 +1194,13 @@ export interface GradedCardResult {
   graded_value: number | null
   net_if_sold: number | null
   profit: number | null
+  /**
+   * `realised` when a recorded sale is behind the figure, `market` when it is
+   * today's price for that grade. The difference between a result and a
+   * projection, so it travels per card.
+   */
+  value_basis: string | null
+  sold_on: string | null
   blockers: string[]
 }
 
@@ -1211,6 +1218,12 @@ export interface SubmissionReturn {
   roi_pct: number | null
   /** Positive means the grader was kinder than the model expected. */
   mean_surprise: number | null
+  /**
+   * How many of the scored cards rest on money that actually arrived. A parcel
+   * scored half on sales and half on current prices is a different claim from
+   * either one on its own.
+   */
+  realised_count: number
   cards: GradedCardResult[]
   status_note: string | null
 }

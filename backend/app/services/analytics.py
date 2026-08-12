@@ -34,7 +34,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.enums import BlockStatus, Confidence, Decision, SubmissionStatus, TrendDirection
-from app.models import Card, ConditionAssessment, GradingCompany, GradingSubmission, MarketPrice
+from app.models import (
+    Card,
+    CardDisposal,
+    ConditionAssessment,
+    GradingCompany,
+    GradingSubmission,
+    MarketPrice,
+)
 from app.money import to_major, to_minor
 from app.services import (
     decision as decision_engine,
@@ -322,10 +329,16 @@ class GradedCard:
     #: Positive when it graded better than predicted.
     surprise: float | None = None
     cost: float | None = None
-    #: What the slab is worth now, from that grade's own market data.
+    #: What the slab is worth, either from that grade's market data or — where
+    #: the card has actually been sold — from what it fetched.
     graded_value: float | None = None
     net_if_sold: float | None = None
     profit: float | None = None
+    #: `realised` when this card has a recorded sale behind it, `market` when
+    #: the figure is today's price for that grade. The distinction is the whole
+    #: difference between a result and a projection, so it travels per card.
+    value_basis: str | None = None
+    sold_on: str | None = None
     blockers: list[str] = field(default_factory=list)
 
 
@@ -347,6 +360,10 @@ class SubmissionReturn:
     #: Mean signed difference between actual and predicted grades. Positive
     #: means the grader was kinder than the model expected.
     mean_surprise: float | None = None
+    #: How many of the scored cards rest on money that actually arrived. A
+    #: parcel scored half on sales and half on current prices is a different
+    #: claim from one scored entirely on either.
+    realised_count: int = 0
     cards: list[GradedCard] = field(default_factory=list)
     status_note: str | None = None
 
@@ -429,6 +446,25 @@ def submission_returns(db: Session) -> SubmissionReturns:
                 graded.surprise = round(row.actual_grade - row.predicted_grade, 2)
                 surprises.append(graded.surprise)
 
+            # A sale that happened beats a price that might. The grading cost
+            # still comes from the submission line rather than from the sale
+            # record: this is the parcel's return, and taking the disposal's
+            # own grading figure as well would charge the fee twice.
+            sold = db.scalar(select(CardDisposal).where(CardDisposal.card_id == row.card_id))
+            if sold is not None:
+                graded.value_basis = "realised"
+                graded.sold_on = sold.sold_on.isoformat()
+                graded.graded_value = to_major(sold.gross_minor)
+                graded.net_if_sold = to_major(sold.net_proceeds_minor)
+                value_minor += sold.net_proceeds_minor
+                entry.realised_count += 1
+                if line is not None:
+                    graded.profit = to_major(sold.net_proceeds_minor - line.total_minor)
+                entry.cards.append(graded)
+                if line is not None:
+                    entry_cost_minor += line.total_minor
+                continue
+
             worth = _graded_value_minor(
                 db, card, costing.company_code, row.actual_grade, params, currency
             )
@@ -438,6 +474,7 @@ def submission_returns(db: Session) -> SubmissionReturns:
                     "this slab cannot be valued."
                 )
             else:
+                graded.value_basis = "market"
                 graded.graded_value = to_major(worth)
                 net = economics.net_sale_value(worth, profile, graded=True)
                 if net is not None:
@@ -466,11 +503,25 @@ def submission_returns(db: Session) -> SubmissionReturns:
         # estimate — and a reader comparing the card rows to the header would
         # otherwise think the arithmetic was wrong.
         unvalued = sum(1 for row in entry.cards if row.graded_value is None)
+        notes: list[str] = []
         if unvalued and entry.roi_pct is not None:
-            entry.status_note = (
+            notes.append(
                 f"{unvalued} of {entry.graded_count} graded card(s) have no sales at that grade, "
                 "so they cost money here but add no value. The return is a floor, not an estimate."
             )
+        # Which kind of number this return is made of. A parcel scored entirely
+        # on sales is a result; one scored on current prices is a projection;
+        # and a mixture is neither, which is the case worth naming.
+        if entry.realised_count and entry.realised_count == entry.graded_count:
+            notes.append("Every card here has sold, so this return is money, not an estimate.")
+        elif entry.realised_count:
+            notes.append(
+                f"{entry.realised_count} of {entry.graded_count} card(s) have actually sold; the "
+                "rest are valued at today's price for their grade. The total mixes money with "
+                "estimate."
+            )
+        if notes:
+            entry.status_note = " ".join(notes)
 
         result.scored += 1
         result.submissions.append(entry)

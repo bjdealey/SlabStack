@@ -264,10 +264,22 @@ class GradedCardOut(ApiModel):
     )
     cost: float | None = None
     graded_value: float | None = Field(
-        default=None, description="What the slab is worth now, from that grade's own sales."
+        default=None,
+        description=(
+            "What the slab is worth: what it actually sold for where there is a recorded sale, "
+            "otherwise today's price for that grade. `value_basis` says which."
+        ),
     )
     net_if_sold: float | None = None
     profit: float | None = None
+    value_basis: str | None = Field(
+        default=None,
+        description=(
+            "`realised` when a recorded sale is behind the figure, `market` when it is today's "
+            "price. The difference between a result and a projection, so it travels per card."
+        ),
+    )
+    sold_on: str | None = None
     blockers: list[str] = Field(default_factory=list)
 
 
@@ -288,6 +300,13 @@ class SubmissionReturnOut(ApiModel):
         description=(
             "Mean signed difference between actual and predicted grades. Positive means the "
             "grader was kinder than the model expected."
+        ),
+    )
+    realised_count: int = Field(
+        default=0,
+        description=(
+            "How many of the scored cards rest on money that actually arrived. A parcel scored "
+            "half on sales and half on current prices is a different claim from either."
         ),
     )
     cards: list[GradedCardOut] = Field(default_factory=list)
