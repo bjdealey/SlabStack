@@ -8,14 +8,54 @@ so that the application keeps working with no network at all.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import dotenv_values
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = BACKEND_ROOT.parent
+
+#: Files that may hold local configuration, nearest last so it wins.
+ENV_FILES = (REPO_ROOT / ".env", BACKEND_ROOT / ".env")
+
+
+def load_env_files() -> list[str]:
+    """Put ``.env`` into the real environment, not only into ``Settings``.
+
+    Pydantic reads ``.env`` into *this model* and ignores anything that is not a
+    declared field. Provider credentials are not declared fields and cannot be:
+    which variable a source reads is a row in the ``data_sources`` table, chosen
+    at runtime, so this class has no way to know the names at import time. They
+    are looked up with ``os.environ.get`` when a request is about to be made.
+
+    Without this, a key written into ``.env`` was silently dropped for every
+    provider, and the UI reported it as "not set" while the user was looking
+    straight at the line they had just added. Docker Compose does its own
+    ``.env`` substitution and so was never affected — which made the whole thing
+    worse, because it meant the same file worked or didn't depending on how you
+    started the application, with nothing to suggest why.
+
+    An already-exported variable wins. The shell is the more deliberate
+    statement of the two, and a stale ``.env`` should never quietly override the
+    key someone just set on the command line.
+    """
+    loaded: list[str] = []
+    for path in ENV_FILES:
+        if not path.is_file():
+            continue
+        for key, value in dotenv_values(path).items():
+            if value is None or key in os.environ:
+                continue
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
+
+
+load_env_files()
 
 
 class Settings(BaseSettings):

@@ -1374,7 +1374,7 @@
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": "https://developer.ebay.com/api-docs/static/ebay-rest-landing.html",
-      "notes": "Individual sold listings — the only source here that can fill the graded side of the grading decision, because slabs sell on eBay with the grade in the title. Also the only one that can measure liquidity, which needs real trades. Needs a developer application for SLABSTACK_EBAY_APP_ID and SLABSTACK_EBAY_CERT_ID; sold data additionally needs Marketplace Insights approval, without which active listings still work. Official API under its terms, never scraped."
+      "notes": "Individual sold listings — the only source here that can fill the graded side of the grading decision, because slabs sell on eBay with the grade in the title. Also the only one that can measure liquidity, which needs real trades. Needs a developer application for SLABSTACK_EBAY_APP_ID and SLABSTACK_EBAY_CERT_ID. Sold data needs Marketplace Insights, which eBay documents as a limited release not open to new users — expect active listings only, which feed liquidity but carry no sold or graded prices. Official API under its terms, never scraped."
     },
     {
       "id": "1e1fa7121aca44b58036f8f1432e144d",

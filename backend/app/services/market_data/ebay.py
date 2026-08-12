@@ -106,6 +106,24 @@ _TOKEN_SAFETY_SECONDS = 60
 
 _OAUTH_SCOPE = "https://api.ebay.com/oauth/api_scope"
 
+#: Why no seller username is ever recorded from this source.
+#:
+#: eBay requires every application to either subscribe to marketplace account
+#: deletion notifications — pushing to a public HTTPS endpoint, which a
+#: localhost-only tool cannot have — or to declare that it does not persist eBay
+#: user data. The second is the only route open to this build, and it has to be
+#: *true*, not merely convenient.
+#:
+#: A seller's username is the one field here that identifies a person. Prices,
+#: dates, item ids and listing titles describe a listing; a username describes
+#: somebody. Nothing in this application reads it — no engine, no filter, no
+#: score — so it was pure liability, and dropping it costs nothing and makes the
+#: declaration honest.
+#:
+#: A seller name you type in yourself on a manual sale is untouched by this. It
+#: is your record of your own transaction, and it never came from eBay.
+_NO_SELLER = None
+
 
 class EbayProvider(MarketDataProvider):
     code = "ebay"
@@ -233,7 +251,8 @@ class EbayProvider(MarketDataProvider):
             platform="eBay",
             listing_title=_text(item.get("title")),
             source_url=_text(item.get("itemWebUrl")),
-            seller=_text((item.get("seller") or {}).get("username")),
+            # Deliberately dropped, not forgotten. See _NO_SELLER below.
+            seller=None,
             external_id=_text(item.get("itemId")),
             lot_size=1,
             is_auction="AUCTION" in options,
@@ -307,7 +326,8 @@ class EbayProvider(MarketDataProvider):
             platform="eBay",
             listing_title=_text(item.get("title")),
             source_url=_text(item.get("itemWebUrl")),
-            seller=_text((item.get("seller") or {}).get("username")),
+            # Deliberately dropped, not forgotten. See _NO_SELLER below.
+            seller=None,
             external_id=_text(item.get("itemId")),
             is_auction="AUCTION" in options,
             raw={
