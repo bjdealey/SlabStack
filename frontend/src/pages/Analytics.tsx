@@ -781,13 +781,23 @@ function ReturnCard({ entry, currency }: { entry: SubmissionReturn; currency: st
                 </span>
               </span>
 
-              <span className="tabular w-20 shrink-0 text-right text-xs text-ink-muted">
+              {/* Money that arrived and a price that might are not the same
+                  claim, and a column of figures that mixes them silently is the
+                  quietest way to overstate a return. */}
+              <span className="tabular w-24 shrink-0 text-right text-xs text-ink-muted">
                 {formatMoney(card.net_if_sold, currency)}
+                {card.value_basis === 'realised' ? (
+                  <span className="block text-[0.6rem] text-positive">sold</span>
+                ) : card.value_basis === 'market' ? (
+                  <span className="block text-[0.6rem] text-ink-faint">at today's price</span>
+                ) : null}
               </span>
 
               <span
                 className={cn(
-                  'tabular w-20 shrink-0 text-right text-sm font-medium',
+                  // Wide enough for a signed four-figure sum: at w-20 a good
+                  // parcel wrapped its own profit onto two lines.
+                  'tabular w-28 shrink-0 whitespace-nowrap text-right text-sm font-medium',
                   card.profit === null
                     ? 'text-ink-faint'
                     : card.profit >= 0

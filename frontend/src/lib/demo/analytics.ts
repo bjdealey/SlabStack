@@ -380,6 +380,7 @@ export function buildSubmissionReturns(
       total_profit: null,
       roi_pct: null,
       mean_surprise: null,
+      realised_count: 0,
       cards: [],
       status_note: null,
     }
@@ -412,6 +413,10 @@ export function buildSubmissionReturns(
         graded_value: null,
         net_if_sold: null,
         profit: null,
+        // Nothing can have been sold in a store that resets on every load, so
+        // every figure here is a current price and says so.
+        value_basis: null,
+        sold_on: null,
         blockers: [],
       }
       if (row.predicted_grade !== null && row.actual_grade !== null) {
@@ -426,6 +431,7 @@ export function buildSubmissionReturns(
             'so this slab cannot be valued.',
         )
       } else {
+        card.value_basis = 'market'
         card.graded_value = worth / 100
         const net = netOf(worth)
         if (net !== null) {

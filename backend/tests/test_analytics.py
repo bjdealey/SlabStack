@@ -459,3 +459,74 @@ def test_an_unknown_filter_is_refused(client: TestClient):
     response = client.get("/api/analytics/filters/nonsense")
     assert response.status_code == 404
     assert "not a collection filter" in response.json()["error"]["message"]
+
+
+# --- Returns scored on money rather than on a price --------------------------
+
+
+def test_a_sold_card_is_scored_on_what_it_fetched_not_on_today_s_price(client: TestClient):
+    """A sale that happened beats a price that might.
+
+    Until disposals existed this valued every returned slab at the current
+    market, which made a parcel's ROI drift with the market long after the
+    position was closed.
+    """
+    submission = build_returned_submission(client, actual_grade=10)
+    card_id = submission["cards"][0]["card_id"]
+    estimated = client.get("/api/analytics/submission-returns").json()["submissions"][0]
+    assert estimated["cards"][0]["value_basis"] == "market"
+
+    client.post(
+        f"/api/cards/{card_id}/sold",
+        json={"sold_on": "2026-08-01", "gross": 1500.0, "sold_graded": True,
+              "grade_label": "CGC 10", "net_proceeds": 1400.0},
+    )
+
+    entry = client.get("/api/analytics/submission-returns").json()["submissions"][0]
+    graded = entry["cards"][0]
+
+    assert graded["value_basis"] == "realised"
+    assert graded["net_if_sold"] == 1400.0
+    assert graded["sold_on"] == "2026-08-01"
+    assert entry["realised_count"] == 1
+
+
+def test_the_grading_fee_is_not_charged_twice(client: TestClient):
+    """The submission line is the parcel's cost. Taking the sale record's own
+    grading figure as well would subtract the fee a second time."""
+    submission = build_returned_submission(client, actual_grade=10)
+    card_id = submission["cards"][0]["card_id"]
+    client.post(
+        f"/api/cards/{card_id}/sold",
+        json={"sold_on": "2026-08-01", "gross": 1500.0, "sold_graded": True,
+              "grade_label": "CGC 10", "net_proceeds": 1400.0, "grading_cost": 60.0},
+    )
+
+    graded = client.get("/api/analytics/submission-returns").json()["submissions"][0]["cards"][0]
+
+    assert graded["profit"] == round(1400.0 - graded["cost"], 2)
+
+
+def test_a_parcel_that_has_fully_sold_says_the_return_is_money(client: TestClient):
+    submission = build_returned_submission(client, actual_grade=10)
+    client.post(
+        f"/api/cards/{submission['cards'][0]['card_id']}/sold",
+        json={"sold_on": "2026-08-01", "gross": 1500.0, "sold_graded": True,
+              "grade_label": "CGC 10", "net_proceeds": 1400.0},
+    )
+
+    entry = client.get("/api/analytics/submission-returns").json()["submissions"][0]
+
+    assert "money, not an estimate" in (entry["status_note"] or "")
+
+
+def test_an_unsold_parcel_is_still_scored_at_the_market(client: TestClient):
+    """The fallback has to keep working: most parcels are scored before anything
+    in them is sold."""
+    build_returned_submission(client, actual_grade=10)
+
+    entry = client.get("/api/analytics/submission-returns").json()["submissions"][0]
+
+    assert entry["realised_count"] == 0
+    assert entry["cards"][0]["value_basis"] == "market"
+    assert entry["cards"][0]["net_if_sold"] > 0

@@ -684,6 +684,13 @@ the wrong half to be missing.
 selling performance, and as a signal it was worthless. Both sides are gross now. The UI copy had
 inherited the same error and said "you netted 0% above it" about a number that is a sale price.
 
+**And it closed a second gap.** `submission_returns` valued every returned slab at the current
+market, so a parcel's ROI drifted with the market long after the position was closed. It now prefers
+a recorded sale where there is one, and `value_basis` says per card which it used — a parcel scored
+entirely on sales is a result, one scored on current prices is a projection, and a mixture is
+neither, which is the case the note names. The grading fee still comes from the submission line
+rather than the sale record, because taking both would charge it twice.
+
 ---
 
 ## What is left
@@ -691,8 +698,7 @@ inherited the same error and said "you netted 0% above it" about a number that i
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,
 not an engine — and it will always be a suggestion the user confirms, never applied silently.
 
-`submission_returns` still values returned slabs at current market rather than at realised proceeds.
-Now that disposals exist it should prefer a recorded sale where there is one, and say which it used.
+`submission_returns` now prefers a recorded sale over the current market — see the money loop above.
 
 A PriceCharting CSV import (their Legendary tier ships the whole price guide as a file) would beat
 searching card by card for a large collection.
