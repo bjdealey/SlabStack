@@ -280,3 +280,95 @@ def _rank(confidence: str) -> int:
         Confidence.MEDIUM.value,
         Confidence.HIGH.value,
     ].index(confidence)
+
+
+# --- Liquidity from a reported annual volume ---------------------------------
+
+
+def test_liquidity_can_be_measured_from_a_reported_yearly_count():
+    """The first thing in this build that makes liquidity knowable at all.
+
+    It has read `unknown` on every card since Phase 3 because it is computed
+    from individual sales and no obtainable source supplies them — while being
+    one of the five components of the Grading Opportunity Score.
+    """
+    result = market_service.measure_liquidity([], today=TODAY, annual_volume=260)
+
+    assert result.score is not None
+    assert result.band != "unknown"
+    assert result.basis == "reported_volume"
+    assert result.annual_volume == 260
+    assert result.sales_per_month == round(260 / 12, 2)
+    assert result.median_days_between_sales == round(365 / 260, 1)
+
+
+def test_a_derived_reading_never_fabricates_your_sale_counts():
+    """`sales_90d` means sales you hold records for. It must stay zero.
+
+    Deriving it from an annual figure would turn a reading into a claim about
+    the user's own data, and every confidence check downstream reads those
+    counts.
+    """
+    result = market_service.measure_liquidity([], today=TODAY, annual_volume=520)
+
+    assert (result.sales_7d, result.sales_30d, result.sales_90d, result.sales_365d) == (0, 0, 0, 0)
+    assert result.days_since_last_sale is None, "an annual total cannot date the last sale"
+
+
+def test_your_own_sales_outrank_a_reported_count():
+    """The same precedence prices follow, for the same reason.
+
+    Your sales carry a date each, so they answer recency as well as frequency.
+    """
+    sales = [sale(3, 100.0), sale(20, 105.0), sale(50, 98.0)]
+    result = market_service.measure_liquidity(sales, today=TODAY, annual_volume=9999)
+
+    assert result.basis == "sales"
+    assert result.sales_90d == 3
+    assert result.days_since_last_sale == 3
+    assert result.annual_volume == 9999, "still reported alongside — disagreement is information"
+
+
+def test_a_card_that_sold_nothing_all_year_is_the_most_illiquid_reading():
+    """Zero is a measurement, and it is the one you least want flattened."""
+    result = market_service.measure_liquidity([], today=TODAY, annual_volume=0)
+
+    assert result.basis == "reported_volume"
+    assert result.score is not None and result.score < 3
+    assert result.median_days_between_sales is None, "no cadence to state"
+
+
+def test_no_sales_and_no_reported_volume_stays_unknown():
+    result = market_service.measure_liquidity([], today=TODAY)
+    assert result.score is None
+    assert result.band == "unknown"
+    assert result.basis is None
+
+
+def test_a_busier_card_scores_higher_than_a_quiet_one():
+    quiet = market_service.measure_liquidity([], today=TODAY, annual_volume=6)
+    busy = market_service.measure_liquidity([], today=TODAY, annual_volume=600)
+    assert busy.score > quiet.score
+
+
+def test_a_reading_without_recency_cannot_claim_very_liquid():
+    """Found by driving the UI: one number produced a confident 10.0.
+
+    Normalising over the components that exist makes a partial reading easier to
+    max out than a complete one — with sales you need frequency *and* recency
+    both perfect to reach ten. "Very liquid" means you can realise the money
+    now, and that is what recency evidences.
+    """
+    busy = market_service.measure_liquidity([], today=TODAY, annual_volume=5000)
+
+    assert busy.score == 8.9
+    assert busy.band == "liquid", "high, and not the top rung"
+
+
+def test_sales_can_still_reach_the_top_band():
+    """The cap is about missing evidence, not about being pessimistic."""
+    sales = [sale(days, 100.0) for days in range(0, 90, 2)]
+    result = market_service.measure_liquidity(sales, today=TODAY, active_listings=2)
+
+    assert result.basis == "sales"
+    assert result.band == "very_liquid"

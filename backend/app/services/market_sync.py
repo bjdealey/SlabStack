@@ -437,6 +437,10 @@ def _write_price(
     # Zero sales, and the confidence says so: this is somebody's index, not
     # evidence of what you could have sold it for.
     row.sample_size = 0
+    # Not a sample size and not a price: how often the card trades. Written on
+    # every grade row from this source because the source reports it per
+    # product, and that is the shape liquidity is measured at.
+    row.annual_volume = getattr(point, "annual_volume", None)
     row.confidence = Confidence.LOW.value
     row.computed_at = datetime.now(UTC)
 

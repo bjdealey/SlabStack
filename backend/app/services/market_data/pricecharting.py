@@ -252,6 +252,9 @@ class PriceChartingProvider(MarketDataProvider):
             # count of sales you could have made, and every confidence reading
             # downstream keys off it.
             sample_size=0,
+            # A different question, and the only source in this build that
+            # answers it: how often the card trades, rather than for how much.
+            annual_volume=_volume(product.get("sales-volume")),
             raw={
                 "field": field,
                 "grade_label": key.grade_label,
@@ -375,6 +378,27 @@ def _price_minor(value: Any) -> int | None:
     # Zero means "not enough sales at this grade", which every card has at some
     # grade. It is an absence, not a price of nothing.
     return minor if minor > 0 else None
+
+
+def _volume(value: Any) -> int | None:
+    """Yearly units sold, as a count. Zero is "none sold", which is a reading.
+
+    Distinct from a missing value, which is "this source did not say". A card
+    that genuinely sold nothing all year is the most illiquid case there is, and
+    flattening it to *unknown* would hide exactly the card you least want to
+    grade.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value.isdigit():
+            return None
+        value = int(value)
+    if not isinstance(value, int | float):
+        return None
+    volume = int(value)
+    return volume if volume >= 0 else None
 
 
 def _parse_date(value: Any) -> date | None:

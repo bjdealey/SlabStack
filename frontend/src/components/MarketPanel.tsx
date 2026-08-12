@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Field, Input, Textarea } from '@/components/ui/field'
 import { Panel, PanelBody, PanelDescription, PanelHeader, PanelTitle } from '@/components/ui/panel'
-import { formatDate, formatMoney, formatPercent, humanise } from '@/lib/utils'
+import { formatDate, formatMoney, formatNumber, formatPercent, humanise } from '@/lib/utils'
 
 const BAND_TONES: Record<string, 'positive' | 'caution' | 'negative' | 'neutral'> = {
   very_liquid: 'positive',
@@ -174,25 +174,59 @@ export function MarketPanel({
                     {liquidity.score.toFixed(1)}
                     <span className="text-sm font-normal text-ink-faint">/10</span>
                   </p>
-                  <div className="mt-2.5 grid grid-cols-4 gap-2 text-center">
-                    <Count label="7d" value={liquidity.sales_7d ?? 0} />
-                    <Count label="30d" value={liquidity.sales_30d ?? 0} />
-                    <Count label="90d" value={liquidity.sales_90d ?? 0} />
-                    <Count label="1y" value={liquidity.sales_365d ?? 0} />
-                  </div>
-                  <p className="mt-2.5 border-t border-line pt-2 text-[0.7rem] leading-relaxed text-ink-faint">
-                    {liquidity.days_since_last_sale !== null
-                      ? `Last sale ${liquidity.days_since_last_sale} days ago`
-                      : 'No sale date'}
-                    {liquidity.median_days_between_sales
-                      ? `, typically ${Math.round(liquidity.median_days_between_sales)} days apart`
-                      : ''}
-                    {liquidity.active_listings
-                      ? `. ${liquidity.active_listings} listed unsold`
-                      : ''}
-                    . Across every grade — a card whose slabs rarely appear but whose raw copies
-                    sell weekly still trades.
-                  </p>
+                  {liquidity.basis === 'reported_volume' ? (
+                    /* The windowed counts are all zero here and showing them
+                       would read as "nothing ever sells". They count sales you
+                       hold records for, and this reading never looked at
+                       those. */
+                    <>
+                      <p className="mt-2.5 border-t border-line pt-2 text-[0.7rem] leading-relaxed text-ink-faint">
+                        <strong className="text-ink-muted">
+                          {formatNumber(liquidity.annual_volume ?? 0)} sold in a year
+                        </strong>
+                        {liquidity.median_days_between_sales
+                          ? Math.round(liquidity.median_days_between_sales) <= 1
+                            ? ', about one a day'
+                            : `, about one every ${Math.round(liquidity.median_days_between_sales)} days`
+                          : ''}
+                        {liquidity.active_listings
+                          ? `, against ${formatNumber(liquidity.active_listings)} listed unsold`
+                          : ''}
+                        .
+                      </p>
+                      <p className="mt-1.5 text-[0.7rem] leading-relaxed text-caution">
+                        Reported by a data source, not counted from your own sales — so this
+                        measures how often the card trades and cannot say whether it traded
+                        recently. A card that sold forty times in January and nothing since reads
+                        the same as one selling steadily.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mt-2.5 grid grid-cols-4 gap-2 text-center">
+                        <Count label="7d" value={liquidity.sales_7d ?? 0} />
+                        <Count label="30d" value={liquidity.sales_30d ?? 0} />
+                        <Count label="90d" value={liquidity.sales_90d ?? 0} />
+                        <Count label="1y" value={liquidity.sales_365d ?? 0} />
+                      </div>
+                      <p className="mt-2.5 border-t border-line pt-2 text-[0.7rem] leading-relaxed text-ink-faint">
+                        {liquidity.days_since_last_sale !== null
+                          ? `Last sale ${liquidity.days_since_last_sale} days ago`
+                          : 'No sale date'}
+                        {liquidity.median_days_between_sales
+                          ? `, typically ${Math.round(liquidity.median_days_between_sales)} days apart`
+                          : ''}
+                        {liquidity.active_listings
+                          ? `. ${liquidity.active_listings} listed unsold`
+                          : ''}
+                        {liquidity.annual_volume
+                          ? `. A source reports ${formatNumber(liquidity.annual_volume)} sold in a year`
+                          : ''}
+                        . Across every grade — a card whose slabs rarely appear but whose raw
+                        copies sell weekly still trades.
+                      </p>
+                    </>
+                  )}
                 </>
               )}
             </div>

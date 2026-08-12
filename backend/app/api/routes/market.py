@@ -122,6 +122,8 @@ def _liquidity_out(liquidity: market_service.Liquidity) -> LiquidityOut:
         sold_to_active_ratio=liquidity.sold_to_active_ratio,
         median_days_between_sales=liquidity.median_days_between_sales,
         sales_per_month=liquidity.sales_per_month,
+        basis=liquidity.basis,
+        annual_volume=liquidity.annual_volume,
     )
 
 

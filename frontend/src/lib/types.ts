@@ -491,6 +491,14 @@ export interface LiquidityBlock extends EvaluationBlock {
   sold_to_active_ratio: number | null
   median_days_between_sales: number | null
   sales_per_month: number | null
+  /**
+   * Which evidence the score rests on. `sales` are your own records, which
+   * carry dates and answer both how often this trades and whether it traded
+   * recently. `reported_volume` is a source's yearly unit count — better on the
+   * first question, silent on the second.
+   */
+  basis: string | null
+  annual_volume: number | null
 }
 
 export interface TrendBlock extends EvaluationBlock {
@@ -1003,6 +1011,14 @@ export interface MarketLiquidity {
   sold_to_active_ratio: number | null
   median_days_between_sales: number | null
   sales_per_month: number | null
+  /**
+   * Which evidence the score rests on. `sales` are your own records, which
+   * carry dates and answer both how often this trades and whether it traded
+   * recently. `reported_volume` is a source's yearly unit count — better on the
+   * first question, silent on the second.
+   */
+  basis: string | null
+  annual_volume: number | null
 }
 
 export interface MarketTrend {
