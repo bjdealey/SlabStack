@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response, status
+from pydantic import Field
 from sqlalchemy import select
 
 from app.api.deps import CardDep, DbSession, PaginationParams
 from app.api.errors import ApiError
 from app.models import Card, ConditionAssessment
+from app.money import to_major
 from app.schemas.card import (
     BulkCardCreate,
     CardCreate,
@@ -18,10 +21,11 @@ from app.schemas.card import (
     CardUpdate,
     apply_card_payload,
 )
-from app.schemas.common import Page
+from app.schemas.common import ApiModel, Page
 from app.schemas.evaluation import CardEvaluation
 from app.services import (
     cards_service,
+    collection_import,
     evaluation,
     market_service,
     sales_import,
@@ -30,6 +34,107 @@ from app.services import (
 from app.services.cards_service import CardFilters
 
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+
+class ImportedCardOut(ApiModel):
+    line_number: int
+    name: str
+    set_name: str | None = None
+    set_code: str | None = None
+    card_number: str | None = None
+    variant: str | None = None
+    printing: str | None = None
+    language: str
+    rarity: str | None = None
+    quantity: int
+    raw_condition: str
+    purchase_price: float | None = None
+    purchase_currency: str | None = None
+    purchase_date: date | None = None
+    catalog_key: str | None = None
+    duplicate_of: str | None = Field(
+        default=None, description="Set when this row matches a card already held."
+    )
+    condition_as_written: str | None = Field(
+        default=None, description="What the file said, when we could not make sense of it."
+    )
+
+
+class RowErrorOut(ApiModel):
+    line_number: int | None = None
+    message: str
+
+
+class CollectionImportOut(ApiModel):
+    dry_run: bool
+    status: str
+    reason: str | None = None
+    imported: int
+    duplicates: int
+    failed: int
+    cards: list[ImportedCardOut] = Field(default_factory=list)
+    errors: list[RowErrorOut] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class CollectionImportIn(ApiModel):
+    csv: str = Field(description="The file's contents. Delimiter and column order are detected.")
+
+
+@router.post(
+    "/import",
+    response_model=CollectionImportOut,
+    summary="Import a collection from a CSV export",
+    description=(
+        "Reads a collection export and adds the cards. **Dry run by default**: four hundred "
+        "unwanted rows are far harder to undo than they were to create, so the first thing this "
+        "does is read the file, say exactly what it found, and change nothing.\n\n"
+        "Column names are matched loosely and only a card name is required. Rows matching a card "
+        "already held are reported and, by default, skipped — re-importing last month's file "
+        "should not double the collection.\n\n"
+        "A `Condition` column is stored as a **label**, in `raw_condition`. It does not become a "
+        "condition assessment: spec section 6 rejects NM/LP/MP as the condition model, and "
+        "inventing per-corner severities from one word would put fabricated evidence under a "
+        "grading decision. Imported cards report 'not assessed' until somebody looks at them."
+    ),
+)
+def import_collection(
+    db: DbSession,
+    payload: CollectionImportIn,
+    dry_run: Annotated[bool, Query(description="Read and report without writing.")] = True,
+    skip_duplicates: Annotated[
+        bool, Query(description="Skip rows matching a card already held.")
+    ] = True,
+) -> CollectionImportOut:
+    report = collection_import.import_collection(
+        db, payload.csv, dry_run=dry_run, skip_duplicates=skip_duplicates
+    )
+    if not report.dry_run:
+        db.commit()
+    return CollectionImportOut(
+        dry_run=report.dry_run,
+        status=report.status,
+        reason=report.reason,
+        imported=report.imported,
+        duplicates=report.duplicates,
+        failed=report.failed,
+        cards=[
+            ImportedCardOut(
+                **{
+                    key: value
+                    for key, value in vars(row).items()
+                    if key != "purchase_price_minor"
+                },
+                purchase_price=to_major(row.purchase_price_minor),
+            )
+            for row in report.cards
+        ],
+        errors=[
+            RowErrorOut(line_number=error.line_number, message=error.message)
+            for error in report.errors
+        ],
+        notes=report.notes,
+    )
 
 
 def _assessed_ids(db: DbSession, cards: list[Card]) -> set[str]:

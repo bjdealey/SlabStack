@@ -1489,6 +1489,20 @@ function route(method: string, pathname: string, params: URLSearchParams, raw: u
       },
     ],
     [
+      method === 'POST' && pathname === '/cards/import',
+      // Parsing a CSV is server work, and the demo has no server. Refusing is
+      // better than a browser-side reimplementation that reads files slightly
+      // differently from the one people will actually import with.
+      () =>
+        fail(
+          'conflict',
+          'The demo runs entirely in this browser tab, with a sample collection already ' +
+            'loaded, so there is nothing to import into. This works in the real app: paste a ' +
+            'CSV export and it previews every row before adding anything.',
+          409,
+        ),
+    ],
+    [
       method === 'GET' && at(0) === 'cards' && segments.length === 2,
       () => requireCard(at(1)),
     ],
