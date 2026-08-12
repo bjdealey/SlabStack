@@ -73,7 +73,7 @@ doctor:
 # It reuses video-game field names for card grades, and a price under the wrong
 # grade is silent, plausible and inverts the recommendation.
 pricecharting-fields:
-	cd backend && $(PY) -m scripts.pricecharting_fields $(CARD)
+	cd backend && ID="$(ID)" CARD="$(CARD)" $(PY) -m scripts.pricecharting_fields
 
 schema:
 	cd backend && $(PY) -m scripts.dump_schema
