@@ -76,6 +76,22 @@ def resolve_references(db: Session, card: Card) -> Card:
         if match is not None:
             card.set_id = match.id
             card.set_name = match.name
+    elif card.set_name:
+        # A name is enough when we know the set, and filling the code in from it
+        # matters more than it looks: `catalog_key` prefers the code and falls
+        # back to the name, so "Evolving Skies" typed one way and "EVS" the
+        # other produce two identities for one card — which never share a price,
+        # a sale or a history. Only an exact, same-language name counts.
+        match = db.scalars(
+            select(CardSet).where(
+                func.lower(CardSet.name) == card.set_name.lower(),
+                CardSet.language == card.language,
+            )
+        ).first()
+        if match is not None:
+            card.set_id = match.id
+            card.set_code = match.code
+            card.set_name = match.name
 
     if card.variant_id:
         variant = db.get(CardVariant, card.variant_id)

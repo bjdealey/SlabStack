@@ -1405,6 +1405,53 @@ export interface SyncReport {
   listings_seen: number
 }
 
+/* --- Collection import ---------------------------------------------------- */
+
+/** One row of a collection export, as we read it, before anything is written. */
+export interface ImportedCard {
+  line_number: number
+  name: string
+  set_name: string | null
+  set_code: string | null
+  card_number: string | null
+  variant: string | null
+  printing: string | null
+  language: string
+  rarity: string | null
+  quantity: number
+  /**
+   * A coarse label only. It is deliberately *not* a condition assessment —
+   * spec §6 rejects NM/LP/MP as the condition model — so no engine reads it and
+   * an imported card stays undecided until somebody looks at it.
+   */
+  raw_condition: string
+  purchase_price: number | null
+  purchase_currency: string | null
+  purchase_date: string | null
+  catalog_key: string | null
+  /** Set when this row matches a card already held. */
+  duplicate_of: string | null
+  /** What the file said, when we could not make sense of it. */
+  condition_as_written: string | null
+}
+
+export interface ImportRowError {
+  line_number: number | null
+  message: string
+}
+
+export interface CollectionImport {
+  dry_run: boolean
+  status: string
+  reason: string | null
+  imported: number
+  duplicates: number
+  failed: number
+  cards: ImportedCard[]
+  errors: ImportRowError[]
+  notes: string[]
+}
+
 /* --- Bulk catalogue linking ---------------------------------------------- */
 
 export interface LinkCandidate {

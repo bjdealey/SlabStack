@@ -104,12 +104,67 @@ would be a change of product, not a change of endpoint.
 | GET    | `/api/cards`                  | ✅     | Search, filter, sort, paginate.        |
 | POST   | `/api/cards`                  | ✅     | Add one card.                          |
 | POST   | `/api/cards/bulk`             | ✅     | Add up to 1000 cards in one request.   |
+| POST   | `/api/cards/import`           | ✅     | Import a CSV export. Dry run by default. |
 | GET    | `/api/cards/{id}`             | ✅     | One card, with its images.             |
 | PATCH  | `/api/cards/{id}`             | ✅     | Sparse update.                         |
 | DELETE | `/api/cards/{id}`             | ✅     | Delete the card, its images and its assessments. |
 | POST   | `/api/cards/{id}/split`       | ✅     | Split a stack into one row per physical copy. |
 | GET    | `/api/cards/{id}/evaluation`  | ✅     | **The decision-engine call.** See below. |
 | POST   | `/api/cards/identify`         | ⏳ P3  | Suggest an identity from images.        |
+
+### Importing a collection
+
+`POST /api/cards/import?dry_run=true&skip_duplicates=true` takes `{ "csv": "…" }` and reads a
+collection export. Until it existed the only way in was one card at a time — fine for the card in
+your hand, hopeless for the four hundred in a box.
+
+**Dry run by default.** A bad import is not a wrong answer on screen, it is four hundred rows you
+now have to find and delete, so the first pass reads the file, says exactly what it found, and
+writes nothing.
+
+```jsonc
+{
+  "dry_run": true, "status": "partial",
+  "imported": 9, "duplicates": 0, "failed": 1,
+  "cards": [{
+    "line_number": 2, "name": "Umbreon VMAX",
+    "set_name": "Evolving Skies", "set_code": "EVS",   // resolved, not as written
+    "card_number": "215/203", "quantity": 1,
+    "variant": "Holo", "printing": null, "language": "English",
+    "raw_condition": "Near Mint",
+    "condition_as_written": null,        // set when we could not read it
+    "catalog_key": "english|evs|215-203|holo|unlimited",
+    "duplicate_of": null                 // set when a card already held matches
+  }],
+  "errors": [{ "line_number": 10, "message": "No card name on this row." }],
+  "notes": [ … ]
+}
+```
+
+Column names are matched loosely and only a name is required. Understood: name, set, set code,
+number, quantity, condition, language, foil, printing, rarity, price, currency and purchase date.
+
+**A condition column is a label, not an assessment.** It lands in `raw_condition`, which is
+documented as a quick label and which no engine reads. It deliberately does *not* become a
+`condition_assessment`: spec §6 rejects NM/LP/MP as the condition model, and inventing per-corner
+severities from one word would put fabricated evidence under a grading decision. Imported cards
+report "not assessed" until somebody looks at them, which is true. Anything outside the vocabulary
+stays `Unknown` and travels back as written rather than being rounded to the nearest guess.
+
+**Foil is a variant, not a printing.** `Holo` and `Reverse Holo` are variant rows; `printing` is
+Unlimited / 1st Edition / Shadowless. Both feed `catalog_key`, so filing one under the other gives
+an imported card an identity no hand-added card ever matches — and the two copies never share a
+price. A foiling word found in a `Printing` column is read as the variant it plainly is, because
+exporters disagree about which header carries it.
+
+**An unrecognised language is kept as written**, never assumed to be English: language is part of a
+card's identity, so guessing prices the card against the wrong sales.
+
+**Re-importing must not double the collection.** Each row is matched on `catalog_key` against what
+is already held, and reported rather than silently dropped — you might genuinely have bought a
+second copy, and `skip_duplicates=false` says so. Rows are matched on both the resolved key and the
+key the raw row would have produced, because a card added before `resolve_references` learned to
+fill a set code in from its name carries the older spelling.
 
 ### `GET /api/cards` parameters
 

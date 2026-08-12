@@ -24,6 +24,7 @@ import type {
   HealthResponse,
   ImportResult,
   MarketPrice,
+  CollectionImport,
   Listing,
   MarketSale,
   MarketSummary,
@@ -172,6 +173,11 @@ export const api = {
   getCard: (id: string) => request<Card>(`/cards/${id}`),
   createCard: (payload: CardWrite) =>
     request<Card>('/cards', { method: 'POST', body: JSON.stringify(payload) }),
+  importCollection: (params: { csv: string; dry_run?: boolean; skip_duplicates?: boolean }) =>
+    request<CollectionImport>(
+      `/cards/import${query({ dry_run: params.dry_run, skip_duplicates: params.skip_duplicates })}`,
+      { method: 'POST', body: JSON.stringify({ csv: params.csv }) },
+    ),
   updateCard: (id: string, payload: Partial<CardWrite>) =>
     request<Card>(`/cards/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteCard: (id: string) => request<void>(`/cards/${id}`, { method: 'DELETE' }),

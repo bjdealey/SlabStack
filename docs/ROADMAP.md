@@ -590,13 +590,56 @@ the surrounding code was open.
 
 ---
 
+## Getting a collection in ✅
+
+Every engine above this line was unreachable for a real collection, because the only way to add a
+card was the Add Card form, one at a time. Fine for the card in your hand; hopeless for the four
+hundred in a box. `collection_import.py` reads an export, `POST /api/cards/import` exposes it,
+`ImportCollection.tsx` drives it.
+
+- **Preview first.** A bad import is not a wrong answer on screen, it is four hundred rows you now
+  have to find and delete. The default pass reads the file, reports every row, and writes nothing.
+- **A coarse condition is a label, not an assessment.** "NM" lands in `raw_condition`, which no
+  engine reads, and deliberately does not become a `condition_assessment` — spec §6 rejects NM/LP/MP
+  as the condition model, and inventing per-corner severities from one word would put fabricated
+  evidence under a grading decision. Imported cards report "not assessed", which is true.
+- **Unrecognised is reported, never rounded.** An unfamiliar condition stays `Unknown` and comes
+  back as written; an unfamiliar language is kept rather than assumed to be English.
+- **Re-importing does not double the collection**, and a genuine second copy is one checkbox away.
+
+**Learned the hard way, three times, all in the identity.** A "Foil" column was being written to
+`printing` — but `printing` is Unlimited / 1st Edition / Shadowless, and holo is a *variant*. Both
+feed `catalog_key`, so an imported card would have carried an identity no hand-added card ever
+matches, and the two copies of one card would never have shared a price. Then the preview computed
+each row's key from the raw file while a *saved* card had its key re-derived after the set reference
+resolved — so the two disagreed and a re-import sailed past the duplicate check. And finally: cards
+created before `resolve_references` learned to fill a set code in from its name carry the older
+spelling, so a row is now matched against both spellings of its own identity rather than only the
+new one.
+
+`resolve_references` gained that set-name lookup for the same reason: "Evolving Skies" from a file
+and "EVS" typed by hand were two identities for one card.
+
+---
+
 ## What is left
 
 `POST /api/cards/identify` is the last `501`. Image-assisted identification needs a vision provider,
 not an engine — and it will always be a suggestion the user confirms, never applied silently.
 
+**Condition assessment is now the bottleneck.** Cards import in seconds and each still needs a
+structured assessment before the engine will decide anything, which is right for a card you are
+about to spend £25 grading and wrong as a way to triage four hundred. What is missing is a way to
+rank an imported collection by what the *market* says — raw value and graded premium need no
+condition at all — so the assessments go where they pay.
+
+**The money loop does not close.** A card can be marked sold, and the selling queue prices it, but
+there is nowhere to record what it actually fetched. `submission_returns` scores parcels by valuing
+the slabs at current market rather than at realised proceeds, so the app learns whether its *grade*
+predictions were right and never whether its *profit* predictions were.
+
 A PriceCharting CSV import (their Legendary tier ships the whole price guide as a file) would beat
-searching card by card for a real collection, and is the obvious next thing.
+searching card by card for a large collection.
 
 The `doctor` script's Configuration section still hardcodes eBay's two environment variables, so a
 misconfigured PriceCharting key shows up as silence rather than as a problem. It should read the

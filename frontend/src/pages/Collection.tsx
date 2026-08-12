@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { api, ApiError, keys, type CardListParams } from '@/lib/api'
 import type { Card, CardWrite } from '@/lib/types'
 import { PageHeader } from '@/components/AppShell'
+import { ImportCollectionDialog } from '@/components/ImportCollection'
 import { CardForm } from '@/components/CardForm'
 import { CardSearch } from '@/components/CardSearch'
 import { Button } from '@/components/ui/button'
@@ -35,6 +36,7 @@ export function Collection() {
     setAdding(true)
   }
   const [adding, setAdding] = useState(params.get('new') === '1')
+  const [importing, setImporting] = useState(false)
 
   // Typing in a search box should not fire a request per keystroke.
   useEffect(() => {
@@ -125,6 +127,9 @@ export function Collection() {
                 <List className="size-4" />
               </button>
             </div>
+            <Button variant="secondary" onClick={() => setImporting(true)}>
+              Import
+            </Button>
             <Button variant="primary" onClick={openAdd}>
               Add a card
             </Button>
@@ -305,6 +310,8 @@ export function Collection() {
           )}
         </DialogContent>
       </Dialog>
+
+      <ImportCollectionDialog open={importing} onOpenChange={setImporting} />
     </>
   )
 }
