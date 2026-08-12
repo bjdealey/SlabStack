@@ -12,19 +12,28 @@ beating a better one you cannot.
 PriceCharting is a video-game price guide that also covers cards, and it reuses
 the game condition fields for card grades: ``box-only-price`` and
 ``manual-only-price`` hold grades, not boxes and manuals. Which field means
-which grade is the single most important fact in this module and the one this
-build has never been able to verify — the sandbox cannot reach the site, and the
-published documentation does not spell the mapping out.
+which grade is the single most important fact in this module, and the published
+documentation does not spell it out.
 
-So it lives in ``grade_fields`` on the data source, ships marked unconfirmed,
-and **no graded price is written until it is confirmed**. Getting this wrong
-would not break anything visibly. It would put a real number from the wrong
-grade beside the raw price and quietly invert the recommendation, which is worse
-than returning nothing at all.
-
+So it lives in ``grade_fields`` on the data source and
 ``make pricecharting-fields`` prints what the API actually returned next to what
-the mapping claims, so confirming it is half a minute of looking at the card's
-own page rather than an act of faith.
+the mapping claims — which is how the shipped default stopped being folklore:
+every field was matched against PriceCharting's own published guide for a real
+card, by exact price.
+
+**That check paid for itself immediately.** The widely repeated mapping was
+wrong in two places: ``graded-price`` and ``box-only-price`` are the *generic*
+Grade 9 and Grade 9.5, pooled across graders, not PSA 9 and PSA 9.5. Shipping
+them as PSA would have been a precision claim nothing supported. They are still
+read as PSA, because an unpriced grade counts against P(profit) and grade 9 is
+where much of the outcome distribution sits — but that is an approximation
+stated out loud, in the source's own notes, rather than a mistake hidden in a
+constant.
+
+Getting this wrong would not break anything visibly. It would put a real number
+from the wrong grade beside the raw price and quietly invert the recommendation,
+which is worse than returning nothing at all — so a source whose mapping has not
+been confirmed still writes only the raw price.
 
 **What it does not give.** No individual sales — these are PriceCharting's own
 aggregates over recent eBay sold listings — so a price arrives with no sample
@@ -57,18 +66,34 @@ PRICE_CURRENCY = "USD"
 #: A paid key, so the limit is generous. Still a background job, not a race.
 DEFAULT_RATE_LIMIT = 60
 
-#: Provisional. Widely reported, never verified by this build, and deliberately
-#: inert until someone says otherwise — see ``mapping_confirmed``.
+#: Verified against PriceCharting's own published price guide by exact price
+#: match, field by field, for a real card. It is no longer folklore — but it is
+#: still data rather than code, because a price guide can change its shape and
+#: correcting that should not need a release.
 #:
-#: ``loose-price`` is the exception: "loose" meaning ungraded is unambiguous on
-#: a price guide that started with cartridges, and it is the one entry here that
-#: is not a reuse of a video-game field name for something else entirely.
+#: Five entries are exactly true. The card grades on this API are stated
+#: per-company for the tens (PSA 10, BGS 10, CGC 10, SGC 10) and generically
+#: below that (Grade 7, Grade 8, Grade 9, Grade 9.5) — the generic ones pool
+#: every grader.
+#:
+#: Those four are read as PSA, which is an approximation and is said out loud
+#: here and in the source's notes rather than buried. PSA dominates Pokémon
+#: grading volume, so the figure is heavily PSA-weighted; and an unpriced grade
+#: counts *against* P(profit) rather than being renormalised away, so leaving
+#: grade 9 empty — where much of the outcome distribution sits — costs more
+#: accuracy than the approximation does.
 DEFAULT_GRADE_FIELDS: dict[str, str] = {
     "loose-price": "raw",
+    # Generic grades, pooled across graders. Read as PSA; see above.
+    "cib-price": "PSA 7",
+    "new-price": "PSA 8",
     "graded-price": "PSA 9",
     "box-only-price": "PSA 9.5",
+    # Company-specific, and exact.
     "manual-only-price": "PSA 10",
     "bgs-10-price": "BGS 10",
+    "condition-17-price": "CGC 10",
+    "condition-18-price": "SGC 10",
 }
 
 #: Fields that are certainly not grades, so a mapping naming one is a mistake

@@ -34,7 +34,7 @@ def provider(*, confirmed: bool = False, transport=None, **config) -> PriceChart
     )
 
 
-def key(grade_label: str = "raw", external_id: str = "6910335") -> MarketKey:
+def key(grade_label: str = "raw", external_id: str = "2513024") -> MarketKey:
     return MarketKey(catalog_key="k", grade_label=grade_label, external_id=external_id)
 
 
@@ -45,14 +45,14 @@ def test_the_raw_price_flows_without_confirmation():
     """"Loose" is the one label here that cannot mean anything else."""
     point = provider().get_current_price(key("raw"))
     assert point is not None
-    assert point.value_minor == 21_500
+    assert point.value_minor == 220_000, "$2,200.00 — Ungraded on the site"
     assert point.currency == "USD"
 
 
 def test_a_graded_price_is_withheld_until_the_mapping_is_confirmed():
     """The whole safety property.
 
-    manual-only-price is $420 in the fixture. If the mapping is wrong that is
+    manual-only-price is $4,300 in the fixture. If the mapping is wrong that is
     some other grade's price wearing a PSA 10 label — a number no reader could
     tell from a correct one.
     """
@@ -62,7 +62,7 @@ def test_a_graded_price_is_withheld_until_the_mapping_is_confirmed():
 def test_confirming_the_mapping_releases_the_graded_prices():
     point = provider(confirmed=True).get_current_price(key("PSA 10"))
     assert point is not None
-    assert point.value_minor == 42_000
+    assert point.value_minor == 430_000, "$4,300.00 — PSA 10 on the site"
     assert point.raw["field"] == "manual-only-price"
 
 
@@ -80,7 +80,7 @@ def test_the_mapping_is_data_and_a_corrected_one_is_obeyed():
     )
     point = corrected.get_current_price(key("PSA 10"))
     assert point is not None
-    assert point.value_minor == 96_000, "read the field it was told to, not the default"
+    assert point.value_minor == 507_680, "read the field it was told to, not the default"
 
 
 def test_a_mapping_naming_something_that_is_not_a_price_is_refused():
@@ -96,21 +96,21 @@ def test_a_mapping_naming_something_that_is_not_a_price_is_refused():
 
 
 def test_prices_are_already_in_minor_units():
-    """21500 is $215.00. Converting to float and back only loses pennies."""
+    """220000 is $2,200.00. Converting to float and back only loses pennies."""
     point = provider().get_current_price(key("raw"))
-    assert point.value_minor == 21_500
+    assert point.value_minor == 220_000
 
 
 def test_a_zero_price_is_an_absence_not_a_price_of_nothing():
     """Every card has some grade with too few sales behind it."""
     adapter = provider(confirmed=True, transport=recorded.transport(recorded.RAW_ONLY))
-    assert adapter.get_current_price(key("PSA 10", "6910400")) is None
-    assert adapter.get_current_price(key("raw", "6910400")).value_minor == 450
+    assert adapter.get_current_price(key("PSA 10", "2513100")) is None
+    assert adapter.get_current_price(key("raw", "2513100")).value_minor == 450
 
 
 def test_a_product_with_no_prices_returns_nothing():
     adapter = provider(transport=recorded.transport(recorded.UNPRICED))
-    assert adapter.get_current_price(key("raw", "6910401")) is None
+    assert adapter.get_current_price(key("raw", "2513101")) is None
 
 
 def test_the_sample_size_stays_zero():
@@ -158,7 +158,7 @@ def test_an_unlinked_card_is_not_searched_for_on_every_sync():
 def test_search_returns_candidates_with_their_set():
     matches = provider().search_card(UMBREON)
     assert matches
-    assert matches[0].external_id == "6910335"
+    assert matches[0].external_id == "2513024"
     assert matches[0].set_name == "Pokemon Evolving Skies"
 
 
@@ -186,10 +186,10 @@ def test_it_claims_no_sales_or_listings():
 
 def test_the_raw_fields_are_exposed_unmapped_for_confirmation():
     """`make pricecharting-fields` shows what arrived, not a tidied version."""
-    fields = provider().fields_for_product("6910335")
-    assert fields["manual-only-price"] == 42_000
-    assert fields["box-only-price"] == 36_000
-    assert fields["cib-price"] == 24_000, "including fields the mapping ignores"
+    fields = provider().fields_for_product("2513024")
+    assert fields["manual-only-price"] == 430_000
+    assert fields["box-only-price"] == 290_000
+    assert fields["condition-17-price"] == 286_515, "including the ones once missed"
 
 
 # --- The sync, which is where this source nearly failed silently -------------
@@ -233,7 +233,7 @@ def linked_card(client, db, source) -> str:
         json={"name": "Umbreon VMAX", "set_code": "EVS", "card_number": "215/203"},
     ).json()
     row = db.get(Card, card["id"])
-    row.external_ids = {"pricecharting": "6910335"}
+    row.external_ids = {"pricecharting": "2513024"}
     db.commit()
     return card["id"]
 
@@ -261,7 +261,9 @@ def test_the_sync_asks_for_every_grade_not_just_raw(db, client, pc_source, monke
     card_id = linked_card(client, db, pc_source)
     run_sync(db, pc_source, monkeypatch, confirmed=True)
 
-    assert stored_labels(db, card_id) >= {"raw", "PSA 9", "PSA 9.5", "PSA 10", "BGS 10"}
+    assert stored_labels(db, card_id) >= {
+        "raw", "PSA 7", "PSA 8", "PSA 9", "PSA 9.5", "PSA 10", "BGS 10", "CGC 10", "SGC 10"
+    }
 
 
 def test_an_unconfirmed_mapping_writes_only_the_raw_price(db, client, pc_source, monkeypatch):
@@ -320,10 +322,66 @@ def test_without_an_exchange_rate_nothing_is_written_and_the_run_says_why(
     card = client.post(
         "/api/cards", json={"name": "Umbreon VMAX", "card_number": "215/203"}
     ).json()
-    db.get(Card, card["id"]).external_ids = {"pricecharting": "6910335"}
+    db.get(Card, card["id"]).external_ids = {"pricecharting": "2513024"}
     db.commit()
 
     report = run_sync(db, pc_source, monkeypatch, confirmed=True)
 
     assert stored_labels(db, card["id"]) == set(), "fetched, and deliberately not written"
     assert "USD→GBP rate" in (report.cards[0].reason or "")
+
+
+# --- Correcting a mapping already sitting in somebody's database -------------
+
+
+def test_the_superseded_mapping_is_corrected_in_an_existing_database(db, client):
+    """A wrong default has to be able to reach a database that already has it.
+
+    The first PriceCharting release claimed PSA 9 and PSA 9.5 for what are
+    actually generic, grader-pooled grades. Anyone who had already seeded it
+    would go on mislabelling every graded price, and nothing would say so.
+    """
+    from sqlalchemy import select
+
+    from app.models import DataSource
+    from app.services import seed
+
+    source = db.scalar(select(DataSource).where(DataSource.code == "pricecharting"))
+    source.config = {
+        "grade_fields": {
+            "loose-price": "raw",
+            "graded-price": "PSA 9",
+            "box-only-price": "PSA 9.5",
+            "manual-only-price": "PSA 10",
+            "bgs-10-price": "BGS 10",
+        },
+        "grade_fields_confirmed": False,
+    }
+    db.commit()
+
+    seed.seed_all(db)
+    db.commit()
+    db.refresh(source)
+
+    assert source.config["grade_fields"]["graded-price"] == "PSA 9"
+    assert source.config["grade_fields"]["condition-17-price"] == "CGC 10"
+    assert source.config["grade_fields_confirmed"] is True
+
+
+def test_a_mapping_you_edited_is_never_overwritten(db, client):
+    """The reason it lives in config at all. Your correction outranks the default."""
+    from sqlalchemy import select
+
+    from app.models import DataSource
+    from app.services import seed
+
+    source = db.scalar(select(DataSource).where(DataSource.code == "pricecharting"))
+    mine = {"loose-price": "raw", "bgs-10-price": "PSA 10"}
+    source.config = {"grade_fields": mine, "grade_fields_confirmed": True}
+    db.commit()
+
+    seed.seed_all(db)
+    db.commit()
+    db.refresh(source)
+
+    assert source.config["grade_fields"] == mine

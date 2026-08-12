@@ -1348,7 +1348,7 @@
       "last_sync_at": null,
       "last_sync_status": null,
       "terms_url": "https://www.pricecharting.com/api-documentation",
-      "notes": "Graded prices as named fields — the only source here that fills the slab side of the grading decision without an approval process. Needs a paid API key. Quotes USD, so an exchange rate is required. Aggregates, not individual sales, so liquidity stays unknown. Check the grade mapping before trusting it: run `make pricecharting-fields` and set grade_fields_confirmed."
+      "notes": "Graded prices as named fields — the only source here that fills the slab side of the grading decision without an approval process. Needs a paid API key. Quotes USD, so an exchange rate is required. Aggregates, not individual sales, so liquidity stays unknown. One approximation, stated rather than hidden: PriceCharting reports the tens per company (PSA 10, BGS 10, CGC 10, SGC 10) but grades 7 to 9.5 generically, pooled across graders — those four are recorded as PSA. Run `make pricecharting-fields` to check the mapping against the site yourself."
     },
     {
       "id": "4bcd5eba00124592a1a6bc88f4e6686e",
