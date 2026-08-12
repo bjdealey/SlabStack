@@ -11,8 +11,9 @@ from sqlalchemy import select
 
 from app.api.deps import CardDep, DbSession, PaginationParams
 from app.api.errors import ApiError
-from app.models import Card, ConditionAssessment
-from app.money import to_major
+from app.enums import CardStatus
+from app.models import Card, CardDisposal, ConditionAssessment
+from app.money import to_major, to_minor
 from app.schemas.card import (
     BulkCardCreate,
     CardCreate,
@@ -26,6 +27,7 @@ from app.schemas.evaluation import CardEvaluation
 from app.services import (
     cards_service,
     collection_import,
+    disposals,
     evaluation,
     market_service,
     sales_import,
@@ -135,6 +137,161 @@ def import_collection(
         ],
         notes=report.notes,
     )
+
+
+# --- What a card actually sold for -------------------------------------------
+
+
+class DisposalIn(ApiModel):
+    """Recording a sale. A price and a date is the whole of the common case."""
+
+    sold_on: date
+    gross: float = Field(ge=0, description="What the buyer paid for the card itself.")
+    sold_graded: bool = False
+    grade_label: str = "raw"
+    grade: float | None = None
+    company_id: str | None = None
+    platform: str | None = Field(
+        default=None, description="A selling profile code, used to estimate the costs below."
+    )
+    shipping_income: float | None = None
+    fees: float | None = Field(
+        default=None, description="Everything the platform and processor took, as one figure."
+    )
+    postage_cost: float | None = None
+    packaging_cost: float | None = None
+    net_proceeds: float | None = Field(
+        default=None,
+        description=(
+            "What actually reached you. Supply it from a payout statement and it wins over "
+            "every estimate above, and is recorded as yours rather than derived."
+        ),
+    )
+    grading_cost: float | None = Field(
+        default=None,
+        description=(
+            "What grading this card cost. Null means unrecorded, never free — a realised "
+            "profit computed without it would flatter grading."
+        ),
+    )
+    notes: str | None = None
+
+
+class DisposalOut(ApiModel):
+    id: str
+    card_id: str | None = None
+    card_name: str | None = None
+    sold_on: date
+    platform: str | None = None
+    currency: str = "GBP"
+    sold_graded: bool = False
+    grade_label: str = "raw"
+    grade: float | None = None
+    gross: float
+    shipping_income: float | None = None
+    fees: float | None = None
+    postage_cost: float | None = None
+    packaging_cost: float | None = None
+    net_proceeds: float
+    net_is_user_entered: bool = False
+    grading_cost: float | None = None
+    notes: str | None = None
+
+    @classmethod
+    def from_model(cls, row: CardDisposal) -> DisposalOut:
+        return cls(
+            id=row.id,
+            card_id=row.card_id,
+            card_name=row.card_name,
+            sold_on=row.sold_on,
+            platform=row.platform,
+            currency=row.currency,
+            sold_graded=row.sold_graded,
+            grade_label=row.grade_label,
+            grade=row.grade,
+            gross=to_major(row.gross_minor) or 0.0,
+            shipping_income=to_major(row.shipping_income_minor),
+            fees=to_major(row.fees_minor),
+            postage_cost=to_major(row.postage_cost_minor),
+            packaging_cost=to_major(row.packaging_cost_minor),
+            net_proceeds=to_major(row.net_proceeds_minor) or 0.0,
+            net_is_user_entered=row.net_is_user_entered,
+            grading_cost=to_major(row.grading_cost_minor),
+            notes=row.notes,
+        )
+
+
+@router.post(
+    "/{card_id}/sold",
+    response_model=DisposalOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record what this card actually sold for",
+    description=(
+        "The one figure in this application that is not a projection. Everything else — what a "
+        "card is worth, what grading costs, what a sale would net — is an estimate; this is the "
+        "money that arrived.\n\n"
+        "Only `sold_on` and `gross` are required. The costs are filled in from the selling "
+        "profile so that recording a sale is a price and a date, and any of them can be "
+        "overridden. A supplied `net_proceeds` wins over all of it and is marked as yours, "
+        "because a payout statement is a fact and a fee model is not.\n\n"
+        "The card is marked `sold`."
+    ),
+)
+def record_sale(db: DbSession, card: CardDep, payload: DisposalIn) -> DisposalOut:
+    existing = db.scalar(select(CardDisposal).where(CardDisposal.card_id == card.id))
+    if existing is not None:
+        raise ApiError(
+            "conflict",
+            "This card is already recorded as sold. Correct that record rather than adding a "
+            "second one — a card sells once, and two records would double the realised profit.",
+            status.HTTP_409_CONFLICT,
+        )
+    row = disposals.record_disposal(
+        db,
+        card,
+        sold_on=payload.sold_on,
+        gross_minor=to_minor(payload.gross) or 0,
+        sold_graded=payload.sold_graded,
+        grade_label=payload.grade_label,
+        grade=payload.grade,
+        company_id=payload.company_id,
+        platform=payload.platform,
+        shipping_income_minor=to_minor(payload.shipping_income),
+        fees_minor=to_minor(payload.fees),
+        postage_cost_minor=to_minor(payload.postage_cost),
+        packaging_cost_minor=to_minor(payload.packaging_cost),
+        net_proceeds_minor=to_minor(payload.net_proceeds),
+        grading_cost_minor=to_minor(payload.grading_cost),
+        notes=payload.notes,
+    )
+    db.commit()
+    db.refresh(row)
+    return DisposalOut.from_model(row)
+
+
+@router.get(
+    "/{card_id}/sold",
+    response_model=DisposalOut | None,
+    summary="What this card sold for, if it has",
+)
+def get_sale(db: DbSession, card: CardDep) -> DisposalOut | None:
+    row = db.scalar(select(CardDisposal).where(CardDisposal.card_id == card.id))
+    return DisposalOut.from_model(row) if row else None
+
+
+@router.delete(
+    "/{card_id}/sold",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Undo a recorded sale",
+    description="Deletes the record and returns the card to your collection.",
+)
+def delete_sale(db: DbSession, card: CardDep) -> Response:
+    row = db.scalar(select(CardDisposal).where(CardDisposal.card_id == card.id))
+    if row is not None:
+        db.delete(row)
+    card.status = CardStatus.IN_COLLECTION.value
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _assessed_ids(db: DbSession, cards: list[Card]) -> set[str]:

@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Coins,
   Filter as FilterIcon,
+  Banknote,
   PackageCheck,
   ScanEye,
   Sparkles,
@@ -14,6 +15,7 @@ import {
 import { api, keys } from '@/lib/api'
 import type {
   AssessmentCandidate,
+  DisposalOutcome,
   FilterResult,
   Opportunity,
   RankedOpportunities,
@@ -28,9 +30,10 @@ import { DecisionBadge, StatusBadge } from '@/components/DecisionBadge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Panel, PanelBody, PanelDescription, PanelHeader, PanelTitle } from '@/components/ui/panel'
+import { StatTile } from '@/components/StatTile'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmptyState, ErrorState, Skeleton } from '@/components/ui/states'
-import { cn, formatMoney, formatNumber, humanise } from '@/lib/utils'
+import { cn, formatDate, formatMoney, formatNumber, humanise } from '@/lib/utils'
 
 /** The batch the sweep costs against, matching the dashboard. Bulk is the norm. */
 const BATCH = 20
@@ -60,6 +63,7 @@ export function Analytics() {
             <TabsTrigger value="assess">What to assess</TabsTrigger>
             <TabsTrigger value="selling">What to sell</TabsTrigger>
             <TabsTrigger value="returns">What came back</TabsTrigger>
+            <TabsTrigger value="realised">What you made</TabsTrigger>
             <TabsTrigger value="filters">Cuts</TabsTrigger>
             <TabsTrigger value="accuracy">How it's doing</TabsTrigger>
           </TabsList>
@@ -76,6 +80,9 @@ export function Analytics() {
           <TabsContent value="returns">
             <ReturnsTab />
           </TabsContent>
+          <TabsContent value="realised">
+            <RealisedTab />
+          </TabsContent>
           <TabsContent value="filters">
             <FiltersTab />
           </TabsContent>
@@ -85,6 +92,161 @@ export function Analytics() {
         </Tabs>
       </div>
     </>
+  )
+}
+
+/* --- What you actually made ----------------------------------------------- */
+
+/**
+ * The only figures in this application that are not projections.
+ *
+ * `prediction_results` has scored *grade* predictions since Phase 8, so the app
+ * could report that it called a PSA 9 correctly while having no idea whether the
+ * submission made money. This is the other half, and the panel's main job is to
+ * keep the two kinds of number apart: proceeds are what arrived, profit is what
+ * arrived less what it cost — and where a cost was never recorded there is no
+ * profit to show, only a proceeds figure and a note saying what is missing.
+ */
+function RealisedTab() {
+  const report = useQuery({ queryKey: keys.realised, queryFn: api.realised })
+  const data = report.data
+
+  return (
+    <Panel>
+      <PanelHeader>
+        <div className="min-w-0">
+          <PanelTitle>What you actually made</PanelTitle>
+          <PanelDescription>
+            {data
+              ? `${formatNumber(data.sold)} sale(s) recorded, ${formatNumber(data.scored)} with every cost known.`
+              : 'Realised proceeds and profit, against what the market said on the day.'}
+          </PanelDescription>
+        </div>
+        {data ? <StatusBadge status={data.status} /> : null}
+      </PanelHeader>
+
+      <PanelBody className="space-y-3">
+        {report.isError ? <ErrorState error={report.error} /> : null}
+        {report.isLoading ? <RowSkeletons /> : null}
+
+        {data && !data.items.length ? (
+          <EmptyState
+            icon={<Banknote className="size-8" />}
+            title="Nothing sold yet"
+            description={
+              data.reason ??
+              'Mark a card sold from its page and this starts scoring the decisions behind them.'
+            }
+          />
+        ) : null}
+
+        {data?.items.length ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <StatTile
+                label="Net proceeds"
+                value={formatMoney(data.total_net_proceeds, data.currency)}
+                hint="Every recorded sale."
+              />
+              <StatTile
+                label="Realised profit"
+                value={
+                  data.total_realised_profit === null
+                    ? '—'
+                    : formatMoney(data.total_realised_profit, data.currency)
+                }
+                hint={`Across the ${formatNumber(data.scored)} with every cost known.`}
+              />
+              <StatTile
+                label="Grading gained"
+                value={
+                  data.total_grading_gain === null
+                    ? '—'
+                    : formatMoney(data.total_grading_gain, data.currency)
+                }
+                hint="Slabs against the raw price the day they sold."
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              {data.items.map((row) => (
+                <RealisedRow key={row.disposal_id} row={row} currency={data.currency} />
+              ))}
+            </div>
+
+            {data.notes.map((note) => (
+              <p key={note} className="text-[0.7rem] leading-relaxed text-ink-faint">
+                {note}
+              </p>
+            ))}
+          </>
+        ) : null}
+      </PanelBody>
+    </Panel>
+  )
+}
+
+/** What the sale is measured against, when there is anything to measure it by. */
+function comparison(row: DisposalOutcome, currency: string): string {
+  const parts: string[] = []
+  if (row.market_value_on_the_day !== null) {
+    // The comparison is the *sale price* against the market, both gross. Saying
+    // "netted" here would describe the payout, which is a different number and
+    // would read as though the platform's fees were a selling mistake.
+    const gap =
+      row.vs_market_pct === null
+        ? ''
+        : row.vs_market_pct === 0
+          ? ' — you sold right at it'
+          : ` — you sold ${Math.abs(row.vs_market_pct)}% ${row.vs_market_pct > 0 ? 'above' : 'below'} it`
+    parts.push(`Worth ${formatMoney(row.market_value_on_the_day, currency)} that day${gap}.`)
+  }
+  if (row.grading_gain !== null) {
+    parts.push(
+      `Grading gained ${formatMoney(row.grading_gain, currency)} over selling it raw that day.`,
+    )
+  }
+  return parts.length
+    ? parts.join(' ')
+    : 'No price history for the day it sold, so there is nothing to compare it against.'
+}
+
+function RealisedRow({ row, currency }: { row: DisposalOutcome; currency: string }) {
+  const body = (
+    <>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="min-w-0 flex-1 truncate text-sm text-ink">{row.name}</span>
+        <span className="text-[0.7rem] text-ink-faint">
+          {formatDate(row.sold_on)} · {row.grade_label}
+        </span>
+        <span className="tabular text-sm text-ink">
+          {formatMoney(row.net_proceeds, currency)}
+        </span>
+        {/* Profit and proceeds are different claims, so an incomplete one shows
+            no number at all rather than a number with a cost missing from it. */}
+        {row.profit_is_complete ? (
+          <Badge tone={(row.realised_profit ?? 0) >= 0 ? 'positive' : 'negative'}>
+            {(row.realised_profit ?? 0) >= 0 ? '+' : ''}
+            {formatMoney(row.realised_profit, currency)}
+          </Badge>
+        ) : (
+          <Badge tone="caution">profit unknown</Badge>
+        )}
+      </div>
+      <p className="pt-0.5 text-[0.7rem] leading-relaxed text-ink-faint">
+        {row.reason ?? comparison(row, currency)}
+      </p>
+    </>
+  )
+  return row.card_id ? (
+    <Link
+      to={`/cards/${row.card_id}`}
+      className="block rounded-lg border border-line px-3 py-2 transition-colors hover:border-brand/50"
+    >
+      {body}
+    </Link>
+  ) : (
+    <div className="rounded-lg border border-line px-3 py-2">{body}</div>
   )
 }
 

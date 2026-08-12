@@ -26,6 +26,9 @@ import type {
   MarketPrice,
   AssessmentQueue,
   CollectionImport,
+  Disposal,
+  DisposalWrite,
+  RealisedReport,
   Listing,
   MarketSale,
   MarketSummary,
@@ -187,6 +190,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(count ? { count } : {}),
     }),
+  // "Sale" already means a *comparable* in this client, so a card's own
+  // disposal gets its own word — the two are not the same fact and confusing
+  // them would put somebody else's sale into your realised profit.
+  getDisposal: (cardId: string) => request<Disposal | null>(`/cards/${cardId}/sold`),
+  recordDisposal: (cardId: string, payload: DisposalWrite) =>
+    request<Disposal>(`/cards/${cardId}/sold`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteDisposal: (cardId: string) =>
+    request<void>(`/cards/${cardId}/sold`, { method: 'DELETE' }),
+  realised: () => request<RealisedReport>('/analytics/realised'),
   evaluateCard: (id: string, batchSize = 1) =>
     request<CardEvaluation>(`/cards/${id}/evaluation${query({ batch_size: batchSize })}`),
 
@@ -402,6 +417,8 @@ export const keys = {
   rankedOpportunities: (batchSize = 1) => ['ranked-opportunities', batchSize] as const,
   sellingQueue: ['selling-queue'] as const,
   assessmentQueue: (batchSize = 1) => ['assessment-queue', batchSize] as const,
+  disposal: (id: string) => ['disposal', id] as const,
+  realised: ['realised'] as const,
   submissionReturns: ['submission-returns'] as const,
   collectionFilters: ['collection-filters'] as const,
   accuracy: ['accuracy'] as const,

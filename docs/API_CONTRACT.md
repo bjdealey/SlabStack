@@ -109,6 +109,9 @@ would be a change of product, not a change of endpoint.
 | PATCH  | `/api/cards/{id}`             | ✅     | Sparse update.                         |
 | DELETE | `/api/cards/{id}`             | ✅     | Delete the card, its images and its assessments. |
 | POST   | `/api/cards/{id}/split`       | ✅     | Split a stack into one row per physical copy. |
+| POST   | `/api/cards/{id}/sold`        | ✅     | Record what it actually sold for.      |
+| GET    | `/api/cards/{id}/sold`        | ✅     | That record, or `null`.                |
+| DELETE | `/api/cards/{id}/sold`        | ✅     | Undo it; the card returns to the collection. |
 | GET    | `/api/cards/{id}/evaluation`  | ✅     | **The decision-engine call.** See below. |
 | POST   | `/api/cards/identify`         | ⏳ P3  | Suggest an identity from images.        |
 
@@ -165,6 +168,33 @@ is already held, and reported rather than silently dropped — you might genuine
 second copy, and `skip_duplicates=false` says so. Rows are matched on both the resolved key and the
 key the raw row would have produced, because a card added before `resolve_references` learned to
 fill a set code in from its name carries the older spelling.
+
+### Recording a sale
+
+`POST /api/cards/{id}/sold` records **the one figure in this application that is not a projection**.
+Everything else — what a card is worth, what grading costs, what a sale would net — is an estimate;
+this is the money that arrived.
+
+Only `sold_on` and `gross` are required. Fees, postage and packaging are filled in from the selling
+profile so that recording a sale is a price and a date rather than a form of nine boxes.
+
+```jsonc
+{ "sold_on": "2026-08-12", "gross": 900.00,
+  "sold_graded": true, "grade_label": "CGC 10",
+  "net_proceeds": 800.00,      // from a payout statement — wins over every estimate
+  "grading_cost": 60.00 }      // null means unrecorded, NEVER free
+```
+
+**A payout you supply beats a payout we compute**, and the response says which it was through
+`net_is_user_entered`. A statement is a fact; a fee model is not, and the two are kept apart the way
+every other override in this application is.
+
+**`grading_cost` null means unrecorded, not free.** A realised profit computed without it would
+flatter grading, which is the exact bias the whole build exists to correct.
+
+The card is marked `sold`. A second sale on the same card is a `409` — a card sells once, and two
+records would double the realised profit. `DELETE` undoes the record and returns the card to the
+collection.
 
 ### `GET /api/cards` parameters
 
@@ -1050,6 +1080,7 @@ survives re-imports and reclassification.
 | GET    | `/api/analytics/opportunities`                  | ✅     | Ranked grading opportunities. |
 | GET    | `/api/analytics/selling-queue`                  | ✅     | Cards to sell raw, with a price to ask. |
 | GET    | `/api/analytics/assessment-queue`               | ✅     | Which unassessed cards are worth the five minutes. |
+| GET    | `/api/analytics/realised`                       | ✅     | What you actually made, against what was predicted. |
 | GET    | `/api/analytics/submission-returns`             | ✅     | Predicted grades against the ones that came back. |
 | GET    | `/api/analytics/filters`                        | ✅     | The saved cuts on offer.      |
 | GET    | `/api/analytics/filters/{key}`                  | ✅     | Apply one saved cut.          |
@@ -1211,6 +1242,43 @@ showing the same figure, and the two cannot drift apart because there is only on
 The same verdicts as `/api/collection/decisions`, cut to `grade` and `grade_if_batch_filled` and
 ranked by `opportunity_score`. `batch_size` changes the list: a card that does not pay alone often
 pays in a submission of twenty.
+
+**`GET /api/analytics/realised`** — query `limit`.
+
+Closes the loop. `prediction_results` has scored *grade* predictions since Phase 8, so the app could
+report that it called a PSA 9 correctly while having no idea whether the submission made money.
+
+```jsonc
+{
+  "sold": 3, "scored": 2,
+  "total_net_proceeds": 1020.08,
+  "total_realised_profit": 681.72,   // only across the ones with every cost known
+  "total_grading_gain": 440.00,
+  "items": [{
+    "name": "Umbreon VMAX 215/203", "sold_on": "2026-08-12", "grade_label": "CGC 10",
+    "net_proceeds": 800.00, "purchase_price": 120.00, "grading_cost": 60.00,
+    "realised_profit": 620.00, "profit_is_complete": true,
+    "market_value_on_the_day": 900.00, "vs_market_pct": 0.0,
+    "raw_value_on_the_day": 300.00, "grading_gain": 440.00
+  }]
+}
+```
+
+Three rules:
+
+- **A profit missing a cost is not reported as a profit.** A sale with no recorded purchase price,
+  or a graded sale with no recorded grading cost, is counted in the proceeds and left out of the
+  profit, with `profit_is_complete: false` and a reason naming what is absent. A total that silently
+  dropped a cost would be wrong in the flattering direction.
+- **Scored against the day, not against today.** `market_value_on_the_day` reads `price_snapshots`
+  at the sale date. Today's price has moved for reasons that have nothing to do with the decision
+  being judged.
+- **`vs_market_pct` compares gross against gross** — the sale price against the market price, never
+  the net payout against a market valuation. Measuring the payout against a sale price reports the
+  fee load as though it were selling badly, and every sale would read about a tenth under the market.
+
+`grading_gain` answers "was grading worth it" with two figures that both actually happened: what the
+slab netted, less what the same card was worth raw on the same day, less what grading cost.
 
 **`GET /api/analytics/assessment-queue`** — query `batch_size`, `limit`.
 

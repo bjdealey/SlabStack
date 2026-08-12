@@ -7,7 +7,9 @@ risk appetite, not a hard-coded assumption (spec sections 22, 41, 42).
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, Float, Integer, String, Text
+from datetime import date
+
+from sqlalchemy import JSON, Boolean, Date, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, money_column, pk_column
@@ -57,3 +59,63 @@ class AppSetting(Base, TimestampMixin):
 
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSON)
+
+
+class CardDisposal(Base, TimestampMixin):
+    """What a card actually fetched — the one figure the engine never estimates.
+
+    Everything else in this application is a projection: what a card is worth,
+    what grading would cost, what a sale would net. This is the row that closes
+    the loop, and it exists because the app could previously learn whether its
+    *grade* predictions were right and never whether its *profit* predictions
+    were — which is a strange gap in a build whose stated purpose is realisable
+    profit rather than theoretical value.
+
+    ``catalog_key`` is denormalised for the same reason ``market_sales`` does it:
+    deleting a card should lose the card, not the lesson.
+    """
+
+    __tablename__ = "card_disposals"
+
+    id: Mapped[str] = pk_column()
+    card_id: Mapped[str | None] = mapped_column(
+        ForeignKey("cards.id", ondelete="SET NULL"), index=True
+    )
+    catalog_key: Mapped[str | None] = mapped_column(String(200), index=True)
+    #: Kept so a sold card still reads as something after the card row is gone.
+    card_name: Mapped[str | None] = mapped_column(String(160))
+
+    sold_on: Mapped[date] = mapped_column(Date, nullable=False)
+    platform: Mapped[str | None] = mapped_column(String(48))
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="GBP")
+
+    # --- What was sold ------------------------------------------------------
+    # Raw or slabbed decides which decision is being scored, so it is stored
+    # rather than inferred from whether a grade happens to be filled in.
+    sold_graded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    company_id: Mapped[str | None] = mapped_column(
+        ForeignKey("grading_companies.id", ondelete="SET NULL")
+    )
+    grade: Mapped[float | None] = mapped_column(Float)
+    grade_label: Mapped[str] = mapped_column(String(24), nullable=False, default="raw")
+
+    # --- The money ----------------------------------------------------------
+    gross_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    shipping_income_minor: Mapped[int | None] = money_column()
+    #: Everything the platform and payment processor took, as one figure. A
+    #: payout statement gives a total far more readily than a breakdown.
+    fees_minor: Mapped[int | None] = money_column()
+    postage_cost_minor: Mapped[int | None] = money_column()
+    packaging_cost_minor: Mapped[int | None] = money_column()
+    net_proceeds_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: True when the user typed the payout rather than letting it be derived.
+    #: Kept apart from the derived figure for the same reason every other
+    #: override in this schema is: the two answer different questions.
+    net_is_user_entered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # --- What it cost to get here -------------------------------------------
+    #: What grading actually cost, when it was graded. Null means unrecorded,
+    #: not free — a realised profit computed without it would flatter grading.
+    grading_cost_minor: Mapped[int | None] = money_column()
+
+    notes: Mapped[str | None] = mapped_column(Text)

@@ -300,6 +300,39 @@ CREATE TABLE grading_tiers (
 CREATE INDEX ix_grading_tiers_company_id ON grading_tiers (company_id);
 
 -- ====================================================================
+-- card_disposals
+-- ====================================================================
+CREATE TABLE card_disposals (
+	id VARCHAR(32) NOT NULL, 
+	card_id VARCHAR(32), 
+	catalog_key VARCHAR(200), 
+	card_name VARCHAR(160), 
+	sold_on DATE NOT NULL, 
+	platform VARCHAR(48), 
+	currency VARCHAR(3) NOT NULL, 
+	sold_graded BOOLEAN NOT NULL, 
+	company_id VARCHAR(32), 
+	grade FLOAT, 
+	grade_label VARCHAR(24) NOT NULL, 
+	gross_minor INTEGER NOT NULL, 
+	shipping_income_minor INTEGER, 
+	fees_minor INTEGER, 
+	postage_cost_minor INTEGER, 
+	packaging_cost_minor INTEGER, 
+	net_proceeds_minor INTEGER NOT NULL, 
+	net_is_user_entered BOOLEAN NOT NULL, 
+	grading_cost_minor INTEGER, 
+	notes TEXT, 
+	created_at DATETIME NOT NULL, 
+	updated_at DATETIME NOT NULL, 
+	CONSTRAINT pk_card_disposals PRIMARY KEY (id), 
+	CONSTRAINT fk_card_disposals_card_id_cards FOREIGN KEY(card_id) REFERENCES cards (id) ON DELETE SET NULL, 
+	CONSTRAINT fk_card_disposals_company_id_grading_companies FOREIGN KEY(company_id) REFERENCES grading_companies (id) ON DELETE SET NULL
+);
+CREATE INDEX ix_card_disposals_card_id ON card_disposals (card_id);
+CREATE INDEX ix_card_disposals_catalog_key ON card_disposals (catalog_key);
+
+-- ====================================================================
 -- card_images
 -- ====================================================================
 CREATE TABLE card_images (
