@@ -703,9 +703,30 @@ not an engine — and it will always be a suggestion the user confirms, never ap
 A PriceCharting CSV import (their Legendary tier ships the whole price guide as a file) would beat
 searching card by card for a large collection.
 
-The `doctor` script's Configuration section still hardcodes eBay's two environment variables, so a
-misconfigured PriceCharting key shows up as silence rather than as a problem. It should read the
-variables each source declares.
+---
+
+## The doctor stops going quiet ✅
+
+`make doctor` checked a hardcoded pair of eBay variables, so a source added later — PriceCharting,
+say — could have a missing or misspelt key and the Configuration section would print nothing at all
+about it. Silence is the one thing a diagnostic must never say about a broken setting.
+
+It now asks every source what it reads, through the same `credential_names` the loader and the API
+use, and carries three genuinely different verdicts:
+
+- **set** — confirmed, and it says whether the value came from a file or the shell, because those
+  are different places and the report that used to be least helpful named a variable to somebody
+  looking straight at the line where they had set it
+- **missing on an enabled source** — a failure, with the fix
+- **missing on a disabled source** — fine, and says so rather than nagging
+
+**Learned on the first run of the new code.** It put a red cross on a working install: the Pokémon
+TCG API declares a key but does not need one, which is exactly why it is the source that ships
+enabled. `api_key_optional` — the same flag `load_provider` already reads — decides it, so the two
+cannot disagree about what a working setup looks like.
+
+The script had no tests at all before this. It has six now, over the coverage rule and the three
+verdicts.
 
 ---
 

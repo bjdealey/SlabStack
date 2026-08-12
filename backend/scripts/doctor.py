@@ -52,9 +52,13 @@ def line(mark: str, text: str, fix: str | None = None) -> None:
 def main() -> int:
     print("\nSlabStack — live market data check\n")
 
-    check_env()
-
     with session_scope() as db:
+        # First, and inside the session because the variables a source reads are
+        # declared on the source. Configuration before anything asks whether it
+        # is right: the report that used to be least helpful was one about a
+        # variable, printed to somebody looking straight at where they set it.
+        check_env(db)
+
         total_cards = db.scalar(select(func.count()).select_from(Card)) or 0
         print(f"  Collection: {total_cards} card(s)\n")
 
@@ -95,7 +99,7 @@ def main() -> int:
     return 0
 
 
-def check_env() -> None:
+def check_env(db) -> None:
     """Where configuration came from, before anything asks whether it is right.
 
     This runs first because of the one report that used to be actively
@@ -126,12 +130,45 @@ def check_env() -> None:
 
     # What the application is actually going to read, which is the only thing
     # that decides whether a provider works.
-    for name in ("SLABSTACK_EBAY_APP_ID", "SLABSTACK_EBAY_CERT_ID"):
-        if os.environ.get(name):
-            origin = "from a file" if name in LOADED_FROM_ENV_FILES else "exported in your shell"
-            line(OK, f"{name} is set ({origin}).")
-        else:
-            line(HM, f"{name} is not set.")
+    #
+    # Asked of every source rather than of a hardcoded pair. The list used to be
+    # eBay's two variables, which meant a source added later — PriceCharting,
+    # say — could have a missing or misspelt key and this section would print
+    # nothing at all about it. Silence is the one thing a diagnostic must never
+    # say about a broken setting.
+    reported = 0
+    for source in db.scalars(
+        select(DataSource)
+        .where(DataSource.provider_class.is_not(None))
+        .order_by(DataSource.priority)
+    ):
+        # A key some sources merely *prefer*: pokemontcg.io works anonymously at
+        # a lower rate limit, which is exactly why it is the one source that
+        # ships enabled. Calling its absence a failure would put a red cross on
+        # a working install, and the same flag the loader reads decides it here.
+        optional = bool((source.config or {}).get("api_key_optional"))
+
+        for name, present in credentials_present(source).items():
+            reported += 1
+            if present:
+                origin = (
+                    "from a file" if name in LOADED_FROM_ENV_FILES else "exported in your shell"
+                )
+                line(OK, f"{name} is set ({origin}) — {source.name}.")
+            elif optional and name == source.api_key_env_var:
+                line(OK, f"{name} is not set — {source.name} does not need one.",
+                     "Setting it raises the rate limit, nothing more.")
+            elif source.enabled:
+                # Enabled and unkeyed is broken now, not one day.
+                line(NO, f"{name} is not set, and {source.name} is enabled.",
+                     "That source cannot authenticate until it is. Set it in .env or your shell, "
+                     "then run this again.")
+            else:
+                line(HM, f"{name} is not set — {source.name} is switched off, so nothing needs it.")
+
+    if not reported:
+        line(OK, "No source needs a credential.",
+             "The Pokémon TCG API works with no account and no key.")
     print()
 
 
