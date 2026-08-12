@@ -328,6 +328,13 @@ Until you do, only the raw price is written. That is deliberate: a price under t
 real number of the right magnitude in the right currency, and it would silently invert the
 recommendation on every card it touched. Returning nothing is better.
 
+**Nine grades, and that is the ceiling.** The API returns `raw`, 7, 8, 9, 9.5, PSA 10, BGS 10,
+CGC 10 and SGC 10 — no more. The tens are named per company and exact; 7 through 9.5 are reported
+generically across graders and recorded here as PSA, which is an approximation rather than a
+reading. **ACE 10 and TAG 10 appear on the website but not in the API at any subscription tier**, so
+an ACE route — the cheapest grader this app supports — can never be priced from this source and will
+honestly report missing coverage instead.
+
 ---
 
 ## Architecture

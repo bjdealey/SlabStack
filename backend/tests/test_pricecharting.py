@@ -385,3 +385,32 @@ def test_a_mapping_you_edited_is_never_overwritten(db, client):
     db.refresh(source)
 
     assert source.config["grade_fields"] == mine
+
+
+def test_the_documented_key_table_is_the_whole_ladder(db, client):
+    """Nine grades, and the tenth does not exist to be had.
+
+    PriceCharting's "Description of Keys" table is the complete list of what
+    /api/product and the CSV return. ACE 10 and TAG 10 are on the website and
+    are not in it at any subscription tier — so an ACE route, the cheapest
+    grader this app supports, can never be priced from this source. Better to
+    have that asserted here than rediscovered as a puzzling blank.
+    """
+    from sqlalchemy import select
+
+    from app.models import DataSource
+
+    source = db.scalar(select(DataSource).where(DataSource.code == "pricecharting"))
+    labels = set(source.config["grade_fields"].values())
+
+    assert labels == {
+        "raw", "PSA 7", "PSA 8", "PSA 9", "PSA 9.5", "PSA 10", "BGS 10", "CGC 10", "SGC 10"
+    }
+    assert not any(label.startswith(("ACE", "TAG")) for label in labels)
+
+
+def test_the_rate_limit_leaves_room_under_one_call_a_second():
+    """Exceeding it is not throttled — the documentation says revoked."""
+    from app.services.market_data import pricecharting as module
+
+    assert module.DEFAULT_RATE_LIMIT < 60

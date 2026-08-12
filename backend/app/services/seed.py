@@ -451,9 +451,8 @@ DATA_SOURCES: tuple[dict, ...] = (
                 "condition-17-price": "CGC 10",
                 "condition-18-price": "SGC 10",
             },
-            # Confirmed by matching every field above against PriceCharting's
-            # own published price guide for a real card, by exact price. The
-            # check is worth repeating for yourself if you want to:
+            # Taken from PriceCharting's own "Description of Keys" table and
+            # cross-checked against a real response. Check it yourself with:
             #   make pricecharting-fields CARD="Umbreon VMAX Evolving Skies"
             # Set this false and only the raw price is written, which is what a
             # source with an unverified mapping should do.
@@ -465,10 +464,11 @@ DATA_SOURCES: tuple[dict, ...] = (
             "the grading decision without an approval process. Needs a paid API key. Quotes "
             "USD, so an exchange rate is required. Aggregates, not individual sales, so "
             "liquidity stays unknown. "
-            "One approximation, stated rather than hidden: PriceCharting reports the tens "
-            "per company (PSA 10, BGS 10, CGC 10, SGC 10) but grades 7 to 9.5 generically, "
-            "pooled across graders — those four are recorded as PSA. Run "
-            "`make pricecharting-fields` to check the mapping against the site yourself."
+            "Nine grades and no more: the API names the tens per company (PSA 10, BGS 10, "
+            "CGC 10, SGC 10) and reports 7, 8, 9 and 9.5 generically across graders — those "
+            "four are recorded as PSA, which is an approximation, not a reading. ACE 10 and "
+            "TAG 10 are on the website but not in the API at any tier, so no ACE route can be "
+            "priced from here. Run `make pricecharting-fields` to see it for yourself."
         ),
     },
     {

@@ -37,8 +37,19 @@ been confirmed still writes only the raw price.
 
 **What it does not give.** No individual sales — these are PriceCharting's own
 aggregates over recent eBay sold listings — so a price arrives with no sample
-size, liquidity stays unknown, and trend still accrues forward from snapshots.
-It answers *what is a slab worth*, not *how easily does it sell*.
+size and trend still accrues forward from snapshots. The documentation is
+explicit: "The API and CSV only support current item values in various grades
+and conditions. Historic prices and historic sales are not supported."
+
+It also does not price every grade the website shows. The documented key table
+is the whole of what the API returns, and ACE 10, TAG 10, BGS 10 Black, CGC 10
+Pristine and grades 1 to 6 are not in it at any subscription tier.
+
+**One thing it does give that nothing else here has:** ``sales-volume``, the
+yearly units sold. Liquidity has been unknown across every source so far, and
+this is a real measurement of how often a card trades. It is not read yet — the
+liquidity engine takes individual sales, not an annual count — but it is the
+first number any source has offered that could answer the question.
 """
 
 from __future__ import annotations
@@ -63,33 +74,51 @@ DEFAULT_BASE_URL = "https://www.pricecharting.com"
 #: Quoted in USD, always, whatever the marketplace the sales came from.
 PRICE_CURRENCY = "USD"
 
-#: A paid key, so the limit is generous. Still a background job, not a race.
-DEFAULT_RATE_LIMIT = 60
+#: The documented ceiling is one call per second, and exceeding it is not a
+#: throttle — PriceCharting says calls "will be blocked and your account
+#: permissions revoked if it persists". Sixty a minute sits exactly on that
+#: line, where ordinary timing jitter puts you over it, so this deliberately
+#: leaves headroom. Nothing here is urgent enough to be worth a paid
+#: subscription.
+#:
+#: For a large collection the API is the wrong tool anyway: Legendary
+#: subscribers can download the whole price guide as one CSV, whose columns are
+#: these same keys. One request instead of nine hundred.
+DEFAULT_RATE_LIMIT = 45
 
-#: Verified against PriceCharting's own published price guide by exact price
-#: match, field by field, for a real card. It is no longer folklore — but it is
-#: still data rather than code, because a price guide can change its shape and
-#: correcting that should not need a release.
+#: Straight from PriceCharting's "Prices API: Description of Keys" table, and
+#: cross-checked against a real response and the site's own price guide. This
+#: is documented behaviour now, not inference — but it stays data rather than
+#: code, because a price guide can change its shape and correcting that should
+#: not need a release.
 #:
-#: Five entries are exactly true. The card grades on this API are stated
-#: per-company for the tens (PSA 10, BGS 10, CGC 10, SGC 10) and generically
-#: below that (Grade 7, Grade 8, Grade 9, Grade 9.5) — the generic ones pool
-#: every grader.
+#: **These nine are the whole of it.** The key table is the complete list of
+#: what ``/api/product`` and the CSV return, so ACE 10, TAG 10, BGS 10 Black,
+#: CGC 10 Pristine and grades 1 to 6 appear on the website and are not available
+#: through the API at any subscription tier. ACE matters: it is the cheapest
+#: grader this app supports, and no route to it can ever be priced from here.
 #:
-#: Those four are read as PSA, which is an approximation and is said out loud
-#: here and in the source's notes rather than buried. PSA dominates Pokémon
-#: grading volume, so the figure is heavily PSA-weighted; and an unpriced grade
-#: counts *against* P(profit) rather than being renormalised away, so leaving
-#: grade 9 empty — where much of the outcome distribution sits — costs more
-#: accuracy than the approximation does.
+#: Four entries are exact — the documentation names the company: PSA 10
+#: (``manual-only-price`` is documented as "Graded 10 by PSA grading service"),
+#: BGS 10, CGC 10, SGC 10.
+#:
+#: Four are approximations, stated rather than buried. The documentation
+#: describes them as "Graded N by a grading company" — any grader — and two of
+#: them pool a half grade with the whole: ``cib-price`` is "7 or 7.5" and
+#: ``new-price`` is "8 or 8.5". They are read as PSA because PSA dominates
+#: Pokémon grading volume, and because an unpriced grade counts *against*
+#: P(profit) rather than being renormalised away — leaving grade 9 empty, where
+#: much of the outcome distribution sits, costs more accuracy than the
+#: approximation does.
 DEFAULT_GRADE_FIELDS: dict[str, str] = {
     "loose-price": "raw",
-    # Generic grades, pooled across graders. Read as PSA; see above.
-    "cib-price": "PSA 7",
-    "new-price": "PSA 8",
+    # "Graded N by a grading company" — any grader, and the first two also pool
+    # the half grade above. Read as PSA; see above.
+    "cib-price": "PSA 7",  # 7 or 7.5
+    "new-price": "PSA 8",  # 8 or 8.5
     "graded-price": "PSA 9",
     "box-only-price": "PSA 9.5",
-    # Company-specific, and exact.
+    # Named companies in the documentation. Exact.
     "manual-only-price": "PSA 10",
     "bgs-10-price": "BGS 10",
     "condition-17-price": "CGC 10",
