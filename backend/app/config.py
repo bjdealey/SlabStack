@@ -55,7 +55,41 @@ def load_env_files() -> list[str]:
     return loaded
 
 
-load_env_files()
+def env_file_report() -> list[dict]:
+    """What each ``.env`` file contributes, for ``make doctor``.
+
+    Separate from loading, because by the time anything asks, loading has
+    already happened and a variable from a file is indistinguishable from one
+    you exported. The failure this exists to name is the nasty one: a file that
+    is present, looks right, and yields nothing.
+
+    Two ways that happens, both invisible while you stare at the file:
+
+    * every line is still commented out after copying ``.env.example``;
+    * it starts with a UTF-8 byte-order mark, which some editors add silently
+      and which fuses onto the first variable name so it matches nothing.
+
+    Names only, never values — the same rule the rest of this build follows.
+    """
+    report: list[dict] = []
+    for path in ENV_FILES:
+        if not path.is_file():
+            report.append({"path": str(path), "exists": False, "keys": [], "bom": False})
+            continue
+        report.append(
+            {
+                "path": str(path),
+                "exists": True,
+                "keys": sorted(key for key, value in dotenv_values(path).items() if value),
+                "bom": path.read_bytes().startswith(b"\xef\xbb\xbf"),
+            }
+        )
+    return report
+
+
+#: Which variables came from a file rather than from the shell. Recorded at
+#: import, because afterwards the two are indistinguishable.
+LOADED_FROM_ENV_FILES: list[str] = load_env_files()
 
 
 class Settings(BaseSettings):

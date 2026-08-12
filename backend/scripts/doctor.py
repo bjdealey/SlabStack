@@ -26,6 +26,7 @@ import sys
 
 from sqlalchemy import func, select
 
+from app.config import LOADED_FROM_ENV_FILES, env_file_report
 from app.db import session_scope
 from app.models import Card, DataSource, MarketListing, MarketPrice, MarketSale
 from app.services import settings_service
@@ -50,6 +51,8 @@ def line(mark: str, text: str, fix: str | None = None) -> None:
 
 def main() -> int:
     print("\nSlabStack — live market data check\n")
+
+    check_env()
 
     with session_scope() as db:
         total_cards = db.scalar(select(func.count()).select_from(Card)) or 0
@@ -90,6 +93,46 @@ def main() -> int:
             print("  grade-or-sell decision still needs graded comparables you enter")
             print("  or import. They fill the raw value, not the decision.\n")
     return 0
+
+
+def check_env() -> None:
+    """Where configuration came from, before anything asks whether it is right.
+
+    This runs first because of the one report that used to be actively
+    unhelpful: "needs SLABSTACK_EBAY_APP_ID in the environment", printed to
+    somebody looking straight at the line where they set it. The environment and
+    the file on disk are different places, and until this section existed
+    nothing said which one the application had actually read.
+    """
+    print("  Configuration")
+    files = env_file_report()
+
+    if not any(entry["exists"] for entry in files):
+        line(HM, "No .env file — reading the shell environment only.",
+             f"Optional. If you meant to use one: {files[0]['path']}")
+    for entry in files:
+        if not entry["exists"]:
+            continue
+        if entry["bom"]:
+            line(NO, f"{entry['path']} starts with a UTF-8 byte-order mark.",
+                 "Invisible in an editor, and it fuses onto the first variable name so nothing "
+                 "matches. Re-save the file as UTF-8 without BOM.")
+        elif entry["keys"]:
+            line(OK, f"{entry['path']} defines {len(entry['keys'])}: {', '.join(entry['keys'])}.")
+        else:
+            line(NO, f"{entry['path']} exists but sets nothing.",
+                 "Usually every line is still commented out from copying .env.example — delete "
+                 "the leading # on the lines you filled in.")
+
+    # What the application is actually going to read, which is the only thing
+    # that decides whether a provider works.
+    for name in ("SLABSTACK_EBAY_APP_ID", "SLABSTACK_EBAY_CERT_ID"):
+        if os.environ.get(name):
+            origin = "from a file" if name in LOADED_FROM_ENV_FILES else "exported in your shell"
+            line(OK, f"{name} is set ({origin}).")
+        else:
+            line(HM, f"{name} is not set.")
+    print()
 
 
 class Result:
